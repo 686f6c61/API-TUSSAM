@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  tussam:
+    build: .
+    container_name: tussam-api
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///app/data/tussam.db
+      - SYNC_ENABLED=true
+      - SYNC_DAY=sun
+      - SYNC_HOUR=4
+      - SYNC_MINUTE=0
+      - SYNC_API_KEY=${SYNC_API_KEY:-cambia-esta-clave}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped

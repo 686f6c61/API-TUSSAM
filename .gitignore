@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Caches de herramientas
+.pytest_cache/
+.ruff_cache/
+
+# Entorno
+.env
+*.env.local
+.venv/
+venv/
+
+# SQLite WAL/SHM (ficheros temporales de journal)
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+firebase-debug.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
