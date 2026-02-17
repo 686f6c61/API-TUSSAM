@@ -42,7 +42,15 @@ class TussamService:
     """
 
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+        self.client = httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                "Accept": "application/json",
+                "Referer": "https://reddelineas.tussam.es/",
+            },
+        )
         self.base_url = BASE_URL
 
     async def close(self):
