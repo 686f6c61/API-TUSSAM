@@ -469,8 +469,21 @@ async def test_sync_con_key_incorrecta(db_ready, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_sin_env_key(db_ready, monkeypatch):
-    """Sin SYNC_API_KEY configurada, sync debe funcionar sin key (dev mode)."""
+    """Sin SYNC_API_KEY configurada, sync debe quedar deshabilitado (fail-closed)."""
     monkeypatch.delenv("SYNC_API_KEY", raising=False)
+    monkeypatch.delenv("ALLOW_INSECURE_SYNC", raising=False)
+    client = _make_client()
+    with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mock:
+        mock.return_value = 100
+        r = client.post("/sync/paradas")
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_sync_sin_env_key_permitido_en_modo_inseguro(db_ready, monkeypatch):
+    """ALLOW_INSECURE_SYNC=true habilita sync sin key para desarrollo local."""
+    monkeypatch.delenv("SYNC_API_KEY", raising=False)
+    monkeypatch.setenv("ALLOW_INSECURE_SYNC", "true")
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mock:
         mock.return_value = 100
@@ -479,9 +492,19 @@ async def test_sync_sin_env_key(db_ready, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sync_rechaza_key_insegura_por_defecto(db_ready, monkeypatch):
+    """Una API key por defecto/predecible debe bloquear endpoints de sync."""
+    monkeypatch.setenv("SYNC_API_KEY", "cambia-esta-clave")
+    client = _make_client()
+    with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock):
+        r = client.post("/sync/paradas", headers={"X-API-Key": "cambia-esta-clave"})
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_sync_all(db_ready, monkeypatch):
     """POST /sync/all debe sincronizar todo."""
-    monkeypatch.delenv("SYNC_API_KEY", raising=False)
+    monkeypatch.setenv("SYNC_API_KEY", "secret-key-123")
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mp, \
          patch("app.main.tussam_service.sync_lineas_from_api", new_callable=AsyncMock) as ml, \
@@ -489,7 +512,7 @@ async def test_sync_all(db_ready, monkeypatch):
         mp.return_value = 967
         ml.return_value = 43
         mr.return_value = 1756
-        r = client.post("/sync/all")
+        r = client.post("/sync/all", headers={"X-API-Key": "secret-key-123"})
 
     assert r.status_code == 200
     data = r.json()

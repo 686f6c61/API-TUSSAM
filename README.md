@@ -2,6 +2,8 @@
 
 API REST para datos en tiempo real de autobuses TUSSAM (Sevilla). Diseñada para alimentar una app de Apple Watch que muestra paradas cercanas y tiempos de llegada.
 
+Versión actual: **1.1.0**
+
 ## Stack
 
 - **FastAPI** + **uvicorn** (async)
@@ -40,7 +42,7 @@ La base de datos incluida (`data/tussam.db`) ya tiene todos los datos. No hace f
 | GET | `/lineas/{numero}/paradas` | Paradas de una línea |
 | GET | `/health` | Estado del servicio |
 
-Endpoints de sincronización (requieren `X-API-Key`):
+Endpoints de sincronización (requieren `X-API-Key` y `SYNC_API_KEY` configurada):
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
@@ -109,7 +111,7 @@ Se guarda en tabla `paradas`: calle, numero, codigo_postal, municipio, provincia
 **Ejecutar la geocodificación manualmente:**
 
 ```bash
-# Opción 1: Con la API arrancada (requiere X-API-Key si está configurada)
+# Opción 1: Con la API arrancada (requiere X-API-Key)
 curl -X POST http://localhost:8080/sync/direcciones \
   -H "X-API-Key: tu-clave"
 
@@ -178,7 +180,10 @@ direcciones_cache (efímero, TTL 30 días)
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
-| `SYNC_API_KEY` | *(vacío)* | API key para endpoints `/sync/*` |
+| `SYNC_API_KEY` | *(vacío)* | API key para endpoints `/sync/*` (si está vacía, `/sync/*` responde 503 por seguridad) |
+| `ALLOW_INSECURE_SYNC` | `false` | Solo desarrollo local: permite `/sync/*` sin API key cuando vale `true` |
+| `ENABLE_API_DOCS` | `false` | Habilita `/docs`, `/redoc` y `/openapi.json` |
+| `CORS_ALLOW_ORIGINS` | *(vacío)* | Lista CSV de orígenes permitidos para CORS (si está vacío, CORS desactivado) |
 | `SYNC_ENABLED` | `true` | Activar scheduler de sync semanal |
 | `SYNC_DAY` | `sun` | Día de sync (mon, tue, wed, ...) |
 | `SYNC_HOUR` | `4` | Hora UTC del sync |
@@ -199,8 +204,11 @@ python -m pytest tests/test_e2e.py -v -s
 
 ## Seguridad
 
-- Autenticación por API key (timing-safe con `hmac.compare_digest`)
+- Autenticación por API key (timing-safe con `hmac.compare_digest`) y fail-closed en `/sync/*`
 - Rate limiting dual: por dispositivo (`X-Device-ID`, 60/min) + por IP (300/min)
+- Protección del rate limiter ante saturación de memoria (`MAX_BUCKETS`)
+- CORS por allowlist (`CORS_ALLOW_ORIGINS`) en vez de wildcard por defecto
+- Documentación OpenAPI desactivada por defecto (`ENABLE_API_DOCS=false`)
 - Validación de parámetros con bounds (lat, lon, radio, bearing, sentido)
 - SQLite en modo WAL con `busy_timeout=5000`
 

@@ -6,7 +6,7 @@ Puntos de entrada (endpoints) de la API.
 Expone los servicios de TUSSAM a través de HTTP.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.0
+Versión: 1.1.0
 Licencia: MIT
 """
 
@@ -30,16 +30,48 @@ from app.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger("tussam.api")
 
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
+WEAK_SYNC_KEYS = {"cambia-esta-clave", "changeme", "change-me", "default", "test", "secret"}
+ALLOWED_DEVICE_ID_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
+
+
+def _is_env_flag_enabled(name: str, default: bool = False) -> bool:
+    """Interpreta una variable de entorno booleana."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in TRUTHY_VALUES
+
+
+def _parse_csv_env(name: str) -> list[str]:
+    """Parses comma-separated env vars trimming whitespace and empty values."""
+    raw = os.getenv(name, "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
 # --- Autenticación para endpoints de sync ---
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_sync_key(api_key: str = Security(api_key_header)):
     """Verifica la API key para endpoints de sincronización."""
-    expected = os.getenv("SYNC_API_KEY", "")
+    expected = os.getenv("SYNC_API_KEY", "").strip()
     if not expected:
-        logger.warning("SYNC_API_KEY no configurada — endpoints de sync SIN PROTECCIÓN")
-        return
+        if _is_env_flag_enabled("ALLOW_INSECURE_SYNC", default=False):
+            logger.warning(
+                "ALLOW_INSECURE_SYNC=true y SYNC_API_KEY vacía: endpoints /sync abiertos (solo desarrollo)"
+            )
+            return
+        logger.error("SYNC_API_KEY no configurada: endpoints /sync bloqueados")
+        raise HTTPException(
+            status_code=503,
+            detail="Sync deshabilitado: configura SYNC_API_KEY",
+        )
+    if expected.lower() in WEAK_SYNC_KEYS:
+        logger.error("SYNC_API_KEY usa un valor inseguro por defecto")
+        raise HTTPException(
+            status_code=503,
+            detail="Sync deshabilitado: SYNC_API_KEY insegura",
+        )
     if not api_key or not hmac.compare_digest(api_key, expected):
         raise HTTPException(status_code=403, detail="API key inválida o ausente")
 
@@ -72,9 +104,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _get_key_and_limit(self, request: Request) -> tuple[str, int]:
         """Determina la clave de rate limiting y su límite."""
-        device_id = request.headers.get("X-Device-ID")
-        if device_id and len(device_id) <= MAX_DEVICE_ID_LEN:
-            return f"device:{device_id}", self.device_limit
+        device_id = request.headers.get("X-Device-ID", "").strip()
+        if (
+            device_id
+            and len(device_id) <= MAX_DEVICE_ID_LEN
+            and all(char in ALLOWED_DEVICE_ID_CHARS for char in device_id)
+        ):
+            return f"device:{device_id.lower()}", self.device_limit
         client_ip = request.client.host if request.client else "unknown"
         return f"ip:{client_ip}", self.ip_limit
 
@@ -89,6 +125,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 del self.buckets[k]
             self.last_cleanup = now
 
+        # Bloquear nuevas claves cuando el mapa de buckets está saturado.
+        if key not in self.buckets and len(self.buckets) >= MAX_BUCKETS:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Rate limiter saturado. Inténtalo de nuevo en unos segundos."},
+                headers={"Retry-After": "5"},
+            )
+
         # Filtrar timestamps dentro de la ventana
         self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
 
@@ -101,6 +145,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         self.buckets[key].append(now)
         return await call_next(request)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Aplica cabeceras de seguridad básicas a todas las respuestas."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 
 
 @asynccontextmanager
@@ -119,29 +174,41 @@ async def lifespan(app: FastAPI):
     await tussam_service.close()
 
 
+docs_enabled = _is_env_flag_enabled("ENABLE_API_DOCS", default=False)
+docs_url = "/docs" if docs_enabled else None
+redoc_url = "/redoc" if docs_enabled else None
+openapi_url = "/openapi.json" if docs_enabled else None
+
 app = FastAPI(
     title="TUSSAM API",
     description="API para obtener horarios y paradas de TUSSAM (Sevilla)",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    version="1.1.0",
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
     lifespan=lifespan,
 )
 
 # Middlewares (orden inverso de ejecución: el último añadido se ejecuta primero)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
+cors_origins = _parse_csv_env("CORS_ALLOW_ORIGINS")
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Accept", "Content-Type", "X-API-Key", "X-Device-ID"],
+    )
+else:
+    logger.info("CORS desactivado: define CORS_ALLOW_ORIGINS para habilitarlo")
 
 
 @app.get("/")
 async def root():
     """Página principal con información básica."""
-    return {"message": "TUSSAM API", "version": "1.0.0", "docs": "/docs"}
+    return {"message": "TUSSAM API", "version": "1.1.0", "docs": docs_url}
 
 
 @app.get("/health")

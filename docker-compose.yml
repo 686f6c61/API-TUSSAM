@@ -14,9 +14,12 @@ services:
       - SYNC_DAY=sun
       - SYNC_HOUR=4
       - SYNC_MINUTE=0
-      - SYNC_API_KEY=${SYNC_API_KEY:-cambia-esta-clave}
+      - SYNC_API_KEY=${SYNC_API_KEY:-}
+      - ALLOW_INSECURE_SYNC=false
+      - ENABLE_API_DOCS=false
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3

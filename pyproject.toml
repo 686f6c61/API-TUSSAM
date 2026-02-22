@@ -1,6 +1,6 @@
 [project]
 name = "tussam-api"
-version = "1.0.0"
+version = "1.1.0"
 description = "API para horarios y paradas de TUSSAM (Sevilla)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
@@ -38,6 +39,11 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["tests*", "data*"]
 
 [build-system]
 requires = ["setuptools>=61.0"]

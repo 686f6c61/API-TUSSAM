@@ -14,7 +14,7 @@ Guia para levantar la API de TUSSAM con Docker. El repositorio incluye `Dockerfi
 git clone https://github.com/686f6c61/API-TUSSAM.git
 cd API-TUSSAM
 
-# 2. Configurar la API key para endpoints de administracion (opcional)
+# 2. Configurar la API key para endpoints de administracion
 export SYNC_API_KEY=$(openssl rand -hex 32)
 echo "SYNC_API_KEY=$SYNC_API_KEY"   # guardar esta clave
 
@@ -48,9 +48,12 @@ services:
       - SYNC_DAY=sun
       - SYNC_HOUR=4
       - SYNC_MINUTE=0
-      - SYNC_API_KEY=${SYNC_API_KEY:-cambia-esta-clave}
+      - SYNC_API_KEY=${SYNC_API_KEY:-}
+      - ALLOW_INSECURE_SYNC=false
+      - ENABLE_API_DOCS=false
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -69,29 +72,37 @@ services:
 ## Dockerfile
 
 ```dockerfile
-FROM python:3.9-slim
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-
 COPY . .
 
-RUN mkdir -p /app/data
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8080
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-La imagen usa `python:3.9-slim` (~150 MB). Se instalan las dependencias antes de copiar el codigo fuente para aprovechar la cache de capas de Docker.
+La imagen usa `python:3.12-slim` (~160 MB) y ejecuta el proceso como usuario no-root (`appuser`) para reducir impacto ante una posible fuga de contenedor.
 
 ## Variables de entorno
 
 | Variable | Default | Descripcion |
 |----------|---------|-------------|
-| `SYNC_API_KEY` | *(vacio)* | Clave para proteger los endpoints `/sync/*`. Si esta vacia, los endpoints de sync quedan abiertos. |
+| `SYNC_API_KEY` | *(vacio)* | Clave para proteger los endpoints `/sync/*`. Si esta vacia, `/sync/*` queda deshabilitado (503). |
+| `ALLOW_INSECURE_SYNC` | `false` | Solo desarrollo local: permite `/sync/*` sin API key cuando vale `true`. |
+| `ENABLE_API_DOCS` | `false` | Habilita `/docs`, `/redoc` y `/openapi.json`. |
+| `CORS_ALLOW_ORIGINS` | *(vacio)* | Lista CSV de origins permitidos por CORS. Si esta vacia, CORS esta desactivado. |
 | `SYNC_ENABLED` | `true` | Activar la sincronizacion automatica semanal con la API de TUSSAM. |
 | `SYNC_DAY` | `sun` | Dia de la semana para el sync (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`). |
 | `SYNC_HOUR` | `4` | Hora UTC del sync (0-23). |
@@ -225,7 +236,7 @@ Si `docker compose ps` muestra `(unhealthy)`:
 
 ```bash
 # Verificar manualmente
-docker compose exec tussam curl http://localhost:8080/health
+docker compose exec tussam python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health').status)"
 
 # Ver logs
 docker compose logs --tail 50 tussam

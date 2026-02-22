@@ -5,7 +5,7 @@ API REST de codigo abierto para datos en tiempo real de autobuses TUSSAM (Transp
 - Datos publicos: paradas, lineas, tiempos de llegada en tiempo real
 - Geocodificacion: cada parada tiene calle, numero, codigo postal
 - Cache inteligente: tiempos se cachean 1 minuto, direcciones 30 dias
-- Documentacion interactiva: `/docs` (Swagger UI) y `/redoc` (ReDoc)
+- Documentacion interactiva opcional por entorno (`ENABLE_API_DOCS=true`)
 
 ---
 
@@ -76,9 +76,12 @@ services:
       - SYNC_DAY=sun               # sincronizar los domingos
       - SYNC_HOUR=4                # a las 04:00 UTC
       - SYNC_MINUTE=0
-      - SYNC_API_KEY=${SYNC_API_KEY:-cambia-esta-clave}
+      - SYNC_API_KEY=${SYNC_API_KEY:-}
+      - ALLOW_INSECURE_SYNC=false
+      - ENABLE_API_DOCS=false
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -129,7 +132,7 @@ curl -X POST http://localhost:8080/sync/all \
   -H "X-API-Key: tu-clave-secreta"
 ```
 
-La API key se configura con la variable de entorno `SYNC_API_KEY`. Si no se configura, los endpoints de sync quedan abiertos (modo desarrollo). La comparacion de claves usa `hmac.compare_digest` para prevenir timing attacks.
+La API key se configura con la variable de entorno `SYNC_API_KEY`. Si no se configura, los endpoints `POST /sync/*` quedan bloqueados con `503` (fail-closed). Para desarrollo local se puede habilitar `ALLOW_INSECURE_SYNC=true`. La comparacion de claves usa `hmac.compare_digest` para prevenir timing attacks.
 
 ---
 
@@ -551,14 +554,14 @@ curl http://localhost:8080/
 ```
 
 ```json
-{"message": "TUSSAM API", "version": "1.0.0", "docs": "/docs"}
+{"message": "TUSSAM API", "version": "1.1.0", "docs": null}
 ```
 
 ---
 
 ### Endpoints de Sincronizacion
 
-Todos los endpoints `POST /sync/*` requieren el header `X-API-Key` (si `SYNC_API_KEY` esta configurada).
+Todos los endpoints `POST /sync/*` requieren `SYNC_API_KEY` configurada y header `X-API-Key`.
 
 #### `POST /sync/all`
 
@@ -635,7 +638,8 @@ curl -X POST http://localhost:8080/sync/direcciones -H "X-API-Key: tu-clave"
 
 | Codigo | Cuando |
 |--------|--------|
-| 403 | `X-API-Key` ausente o incorrecta (si `SYNC_API_KEY` esta configurada) |
+| 403 | `X-API-Key` ausente o incorrecta |
+| 503 | `SYNC_API_KEY` ausente/insegura o sync deshabilitado por configuracion |
 
 ---
 
@@ -1034,7 +1038,10 @@ TUSSAM/
 
 | Variable | Default | Descripcion |
 |----------|---------|-------------|
-| `SYNC_API_KEY` | *(vacio)* | API key para endpoints `/sync/*`. Sin valor = sin proteccion |
+| `SYNC_API_KEY` | *(vacio)* | API key para endpoints `/sync/*`. Sin valor = sync bloqueado (503) |
+| `ALLOW_INSECURE_SYNC` | `false` | Solo desarrollo local: permite `/sync/*` sin API key cuando vale `true` |
+| `ENABLE_API_DOCS` | `false` | Habilita `/docs`, `/redoc` y `/openapi.json` |
+| `CORS_ALLOW_ORIGINS` | *(vacio)* | Lista CSV de origins permitidos. Si esta vacio, CORS queda desactivado |
 | `SYNC_ENABLED` | `true` | Activar scheduler de sync semanal |
 | `SYNC_DAY` | `sun` | Dia de sincronizacion |
 | `SYNC_HOUR` | `4` | Hora UTC |

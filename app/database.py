@@ -9,13 +9,14 @@ Gestión de SQLite para almacenar:
 - Cache de direcciones geocodificadas (TTL: 30 días)
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.0
+Versión: 1.1.0
 Licencia: MIT
 """
 
 import sqlite3
 import aiosqlite
 import logging
+import os
 from typing import List, Optional
 from datetime import datetime, timedelta
 import math
@@ -24,7 +25,19 @@ import json
 logger = logging.getLogger("tussam.database")
 
 # Configuración de la base de datos
-DATABASE_URL = "data/tussam.db"
+def _resolve_database_path() -> str:
+    """
+    Soporta rutas SQLite directas y URLs estilo sqlite+aiosqlite:///... .
+    """
+    raw_value = os.getenv("DATABASE_URL", "data/tussam.db").strip()
+    if raw_value.startswith("sqlite+aiosqlite:///"):
+        return raw_value.replace("sqlite+aiosqlite:///", "", 1)
+    if raw_value.startswith("sqlite:///"):
+        return raw_value.replace("sqlite:///", "", 1)
+    return raw_value
+
+
+DATABASE_URL = _resolve_database_path()
 
 # Tiempo de vida del cache (en minutos)
 # Los tiempos de llegada cambian frecuentemente, 1 minuto es razonable
