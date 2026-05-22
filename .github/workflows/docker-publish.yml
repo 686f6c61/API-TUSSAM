@@ -32,7 +32,7 @@ jobs:
           python -m pip install -e ".[dev]" pip-audit
 
       - name: Compile Python files
-        run: python -m compileall -q app scripts
+        run: python -m compileall -q app
 
       - name: Lint
         run: ruff check .

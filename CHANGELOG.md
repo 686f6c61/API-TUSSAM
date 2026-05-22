@@ -13,6 +13,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) y el v
 - App estática de smoke test en `examples/smoke-app` para validar Docker desde navegador con geocodificación de dirección a coordenadas.
 - Perfil opcional `smoke` en Docker Compose para publicar la app en `http://localhost:8082`.
 
+### Eliminado
+
+- Carpeta `landing/`, que no forma parte de la API ni del despliegue Docker.
+- Scripts standalone históricos de mantenimiento; la geocodificación se mantiene dentro de `/sync/direcciones` y del scheduler.
+
 ## [1.0.2] - 2026-05-22
 
 ### Añadido

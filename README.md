@@ -323,13 +323,13 @@ curl -X POST http://localhost:8081/sync/all -H "X-API-Key: $SYNC_API_KEY"
 
 ### Geocodificación de direcciones
 
-Cuando se añaden paradas nuevas (por cambios en las líneas), sus campos `calle` y `numero` estarán vacíos. Para rellenarlos:
+Cuando se añaden paradas nuevas (por cambios en las líneas), sus campos `calle` y `numero` pueden estar vacíos. Se rellenan desde el endpoint protegido de sincronización:
 
 ```bash
-python scripts/geocode_paradas.py
+curl -X POST http://localhost:8081/sync/direcciones -H "X-API-Key: $SYNC_API_KEY"
 ```
 
-El script lee las coordenadas de la tabla `paradas`, consulta Nominatim (OpenStreetMap) y escribe los resultados. Respeta el rate limit de 1 petición por segundo.
+La API consulta Nominatim (OpenStreetMap), respeta su rate limit de 1 petición por segundo y guarda los resultados directamente en SQLite.
 
 La API **no** hace geocodificación en caliente durante las peticiones. Las direcciones se pregrabaron una vez y se almacenan directamente en la tabla `paradas`. Esto garantiza respuestas instantáneas.
 
@@ -408,8 +408,6 @@ TUSSAM/
 │   ├── scheduler.py          # Scheduler semanal con APScheduler
 │   └── services/
 │       └── tussam.py        # Cliente HTTP para API TUSSAM y Nominatim
-├── scripts/
-│   └── geocode_paradas.py   # Script standalone de geocodificación
 ├── docs/
 │   ├── API.md               # Documentación completa de la API
 │   └── docker.md            # Guía de despliegue con Docker
@@ -422,7 +420,6 @@ TUSSAM/
 │   └── test_e2e.py           # 30 tests end-to-end
 ├── examples/
 │   └── smoke-app/            # App estática para validar Docker en navegador
-├── landing/                  # Landing page de la app
 ├── data/                     # Base de datos SQLite (incluida en repo)
 ├── docker-compose.yml
 ├── Dockerfile

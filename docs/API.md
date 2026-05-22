@@ -730,18 +730,13 @@ curl -X POST http://localhost:8080/sync/paradas-lineas -H "X-API-Key: tu-clave"
 
 ### Geocodificación de direcciones
 
-La geocodificación de calles y números se realiza mediante un script independiente, no desde la API. Esto evita sobrecargar el servicio y permite ejecutarlo solo cuando hay nuevas paradas.
+La geocodificación de calles y números se ejecuta mediante un endpoint protegido de sincronización, no durante las peticiones públicas. Esto evita sobrecargar Nominatim y permite ejecutarla solo cuando hay nuevas paradas.
 
 ```bash
-# Geocodificar paradas sin dirección
-python scripts/geocode_paradas.py
-
-# Simular sin guardar cambios
-python scripts/geocode_paradas.py --dry-run
+curl -X POST http://localhost:8080/sync/direcciones -H "X-API-Key: tu-clave"
 ```
 
-El script usa Nominatim (OpenStreetMap) con rate limiting automático (1 petición/segundo). Las direcciones se guardan directamente en la tabla `paradas`.
-```
+La sincronización usa Nominatim (OpenStreetMap) con rate limiting automático (1 petición/segundo). Las direcciones se guardan directamente en la tabla `paradas`.
 
 **Errores comunes a todos los endpoints de sync:**
 
@@ -1111,6 +1106,8 @@ TUSSAM/
 │       └── tussam.py         # Cliente API TUSSAM + geocodificacion Nominatim
 ├── data/
 │   └── tussam.db             # SQLite con datos precargados (967 paradas, 49 lineas)
+├── examples/
+│   └── smoke-app/            # App estática para validar Docker en navegador
 ├── tests/
 │   ├── conftest.py           # Fixtures compartidas
 │   ├── test_database.py      # 22 tests de base de datos
@@ -1141,7 +1138,7 @@ TUSSAM/
 
 1. **API de TUSSAM** (`reddelineas.tussam.es`): paradas, lineas, tiempos de llegada en tiempo real. Rate limit estricto (429 si se supera). La API usa single-flight por parada, límite de concurrencia saliente, reintentos con backoff y respeta `Retry-After`.
 
-2. **Nominatim** (OpenStreetMap): geocodificacion inversa (coordenadas GPS → calle, numero, codigo postal). Limite: 1 peticion/segundo. Los resultados se cachean 30 dias.
+2. **Nominatim** (OpenStreetMap): geocodificacion inversa (coordenadas GPS → calle, numero, codigo postal). Limite: 1 peticion/segundo. Los resultados se guardan en la tabla `paradas`.
 
 ### Variables de entorno
 
