@@ -21,7 +21,7 @@ async def test_init_db_creates_tables(db_ready):
         )
         tables = [row[0] for row in await cursor.fetchall()]
 
-    expected = ["direcciones_cache", "lineas", "paradas", "paradas_lineas", "tiempos_cache"]
+    expected = ["lineas", "paradas", "paradas_lineas", "tiempos_cache"]
     assert tables == expected
 
 
@@ -218,23 +218,4 @@ async def test_tiempos_cache_expired(db_ready):
         await conn.commit()
 
     cached = await database.get_cached_tiempos("43")
-    assert cached is None
-
-
-# ── Cache de direcciones ─────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_direccion_cache_save_and_get(db_ready):
-    """Guardar y recuperar dirección cacheada."""
-    direccion = {"calle": "Calle Test", "numero": "1", "municipio": "Sevilla"}
-    await database.save_direccion_cache(37.389, -5.984, direccion)
-    cached = await database.get_cached_direccion(37.389, -5.984)
-    assert cached is not None
-    assert cached["calle"] == "Calle Test"
-
-
-@pytest.mark.asyncio
-async def test_direccion_cache_miss(db_ready):
-    """Cache miss de dirección debe devolver None."""
-    cached = await database.get_cached_direccion(0.0, 0.0)
     assert cached is None

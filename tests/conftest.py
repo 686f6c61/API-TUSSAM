@@ -10,12 +10,19 @@ import aiosqlite
 from app import database
 
 
-@pytest.fixture(autouse=True)
-def _use_tmp_db(tmp_path, monkeypatch):
-    """Usa una base de datos temporal para cada test."""
+@pytest_asyncio.fixture(autouse=True)
+async def _use_tmp_db(tmp_path, monkeypatch):
+    """Usa una base de datos temporal para cada test y resetea la conexión."""
+    # Cerrar conexión existente y resetear
+    if database._db is not None:
+        await database._db.close()
+    database._db = None
     db_path = str(tmp_path / "test.db")
     monkeypatch.setattr(database, "DATABASE_URL", db_path)
     yield db_path
+    if database._db is not None:
+        await database._db.close()
+    database._db = None
 
 
 @pytest_asyncio.fixture

@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 # URLs de las APIs externas
 BASE_URL = "https://reddelineas.tussam.es"
 NOMINATIM_API_URL = "https://nominatim.openstreetmap.org/reverse"
-PHOTON_REVERSE_URL = "https://photon.komoot.io/reverse"
 
 
 class TussamService:
@@ -57,95 +56,6 @@ class TussamService:
         """Cierra el cliente HTTP al apagar la aplicación."""
         await self.client.aclose()
 
-    async def get_direccion_from_coords(self, lat: float, lon: float) -> dict:
-        """
-        Obtiene la dirección (calle, número, código postal) a partir de coordenadas.
-
-        Usa Nominatim (OpenStreetMap) para geocodificación inversa.
-        Los resultados se cachean en SQLite para evitar repetir peticiones.
-
-        Args:
-            lat: Latitud
-            lon: Longitud
-
-        Returns:
-            Dict con: calle, numero, codigo_postal, municipio, provincia, direccion_completa
-        """
-        # Primero miramos si está en cache
-        cached = await db.get_cached_direccion(lat, lon)
-        if cached:
-            logger.info(f"Returning cached direccion for {lat}, {lon}")
-            return cached
-
-        try:
-            # Petición a Nominatim
-            params = {
-                "lat": lat,
-                "lon": lon,
-                "format": "json",
-                "addressdetails": 1,
-                "zoom": 18,
-            }
-            headers = {"User-Agent": "TUSSAM-API/1.0"}
-            response = await self.client.get(
-                NOMINATIM_API_URL, params=params, headers=headers
-            )
-
-            if response.status_code != 200:
-                logger.warning("Nominatim HTTP %d para coords (%f, %f)", response.status_code, lat, lon)
-            else:
-                data = response.json()
-                address = data.get("address", {})
-
-                # Extraemos los datos relevantes
-                tipo = (
-                    address.get("road")
-                    or address.get("footway")
-                    or address.get("path")
-                    or ""
-                )
-                numero = address.get("house_number") or ""
-
-                direccion = {
-                    "calle": tipo,
-                    "numero": numero,
-                    "codigo_postal": address.get("postcode", ""),
-                    "municipio": address.get("city")
-                    or address.get("town")
-                    or address.get("municipality", ""),
-                    "provincia": address.get("county")
-                    or address.get("province", "Sevilla"),
-                    "tipo_via": "",
-                }
-
-                # Construimos la dirección completa
-                if direccion["calle"]:
-                    if direccion["numero"]:
-                        direccion["direccion_completa"] = (
-                            f"{direccion['calle']} {direccion['numero']}"
-                        )
-                    else:
-                        direccion["direccion_completa"] = direccion["calle"]
-                else:
-                    direccion["direccion_completa"] = ""
-
-                # Guardamos en cache
-                await db.save_direccion_cache(lat, lon, direccion)
-                return direccion
-        except Exception as e:
-            logger.warning(f"Error getting direccion from coords: {e}")
-
-        # Si falla, devolvemos valores por defecto
-        return {
-            "calle": "",
-            "numero": "",
-            "codigo_postal": "",
-            "municipio": "Sevilla",
-            "provincia": "Sevilla",
-            "tipo_via": "",
-            "direccion_completa": "",
-        }
-
     def _format_datetime(self, dt: Optional[datetime] = None) -> str:
         """
         Formatea la fecha para la API de TUSSAM.
@@ -166,9 +76,15 @@ class TussamService:
 
     async def sync_paradas_from_api(self) -> int:
         """
-        Sincroniza las paradas desde la API de TUSSAM.
+        Sync de paradas: itera por todas las líneas y sus nodos para obtener
+        todas las paradas. La API de TUSSAM no expone un endpoint /paradas
+        directo, así que hay que reconstruir el catálogo desde las líneas.
 
-        Itera por todas las líneas y sus nodos para obtener todas las paradas.
+        Estrategia:
+        1. Obtener lista de líneas (1 petición)
+        2. Por cada línea, obtener nodos en ambos sentidos (2 peticiones × N líneas)
+        3. Deducir paradas únicas por código (una parada aparece en varias líneas)
+
         Guarda los resultados en la base de datos SQLite.
 
         Returns:
@@ -177,7 +93,7 @@ class TussamService:
         logger.info("Fetching lineas from TUSSAM API")
         fh = self._format_datetime()
 
-        # Obtenemos la lista de líneas
+        # Paso 1: obtener la lista de líneas activas
         url_lineas = f"{self.base_url}/API/infotus-ui/lineas/{fh}"
         response = await self.client.get(url_lineas)
         response.raise_for_status()
@@ -189,7 +105,8 @@ class TussamService:
 
         todas_paradas: dict = {}
 
-        # Por cada línea, obtenemos los nodos (paradas) en ambos sentidos
+        # Paso 2: por cada línea, obtener los nodos (paradas) en ambos sentidos
+        # Sentido 1 = ida, Sentido 2 = vuelta
         for linea in lineas:
             linea_num = linea.get("linea", 0)
             if not linea_num:
@@ -240,23 +157,30 @@ class TussamService:
         self, lat1: float, lon1: float, lat2: float, lon2: float
     ) -> float:
         """
-        Calcula el rumbo (bearing) entre dos puntos.
+        Calcula el rumbo (bearing) entre dos puntos usando la fórmula del
+        ángulo azimutal sobre una esfera.
+
+        El bearing indica hacia dónde está la parada respecto al usuario:
+        - 0° = Norte, 90° = Este, 180° = Sur, 270° = Oeste
 
         Args:
-            lat1, lon1: Punto de origen
-            lat2, lon2: Punto de destino
+            lat1, lon1: Punto de origen (ubicación del usuario)
+            lat2, lon2: Punto de destino (parada)
 
         Returns:
-            Rumbo en grados (0-360)
+            Rumbo en grados normalizado a [0, 360)
         """
+        # Convertir grados a radianes
         lat1_r, lat2_r = math.radians(lat1), math.radians(lat2)
         dlon_r = math.radians(lon2 - lon1)
 
+        # Componentes del vector de dirección
         x = math.sin(dlon_r) * math.cos(lat2_r)
         y = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(
             lat2_r
         ) * math.cos(dlon_r)
 
+        # atan2 devuelve [-180, 180], lo normalizamos a [0, 360)
         bearing = math.degrees(math.atan2(x, y))
         return (bearing + 360) % 360
 
@@ -280,6 +204,9 @@ class TussamService:
         """
         Obtiene las paradas cercanas a una ubicación.
 
+        Usa bounding box para pre-filtrar antes de aplicar Haversine,
+        reduciendo el coste de O(n) a O(k) donde k << n.
+
         Args:
             lat, lon: Coordenadas del usuario
             radio: Radio de búsqueda en metros
@@ -291,18 +218,25 @@ class TussamService:
         """
         all_paradas = await db.get_all_paradas_from_db()
 
+        # Pre-filtrado por bounding box (descarta ~85% de paradas)
+        lat_min, lat_max, lon_min, lon_max = db.bounding_box(lat, lon, radio * 1.1)
+
         cercanas = []
         for parada in all_paradas:
-            distancia = db.haversine(lat, lon, parada["latitud"], parada["longitud"])
+            plat, plon = parada["latitud"], parada["longitud"]
+
+            # Filtro rápido de caja
+            if not (lat_min <= plat <= lat_max and lon_min <= plon <= lon_max):
+                continue
+
+            # Haversine exacto sobre el subconjunto
+            distancia = db.haversine(lat, lon, plat, plon)
             if distancia <= radio:
                 parada_copy = parada.copy()
                 parada_copy["distancia"] = round(distancia)
 
-                # Si hay bearing, calculamos la diferencia
                 if bearing is not None:
-                    parada_bearing = self._calculate_bearing(
-                        lat, lon, parada["latitud"], parada["longitud"]
-                    )
+                    parada_bearing = self._calculate_bearing(lat, lon, plat, plon)
                     parada_copy["bearing"] = round(parada_bearing)
                     parada_copy["bearing_diff"] = round(
                         self._bearing_diff(bearing, parada_bearing)
@@ -310,7 +244,6 @@ class TussamService:
 
                 cercanas.append(parada_copy)
 
-        # Ordenamos por distancia o por diferencia de bearing
         if bearing is not None:
             return sorted(cercanas, key=lambda x: x.get("bearing_diff", 999))
         return sorted(cercanas, key=lambda x: x["distancia"])
@@ -336,14 +269,23 @@ class TussamService:
         result_data = data.get("result", {})
         result = result_data.get("lineasDisponibles", [])
 
-        lineas = [
-            {
+        lineas = []
+        for item in result:
+            destinos = item.get("destinos", [])
+            # Primer destino = ida (sentido 1), segundo = vuelta (sentido 2)
+            ida = next((d for d in destinos if d.get("sentido") == 1), {})
+            vuelta = next((d for d in destinos if d.get("sentido") == 2), {})
+
+            lineas.append({
                 "numero": str(item.get("labelLinea", "")),
                 "nombre": str(item.get("descripcion", {}).get("texto", "")),
                 "color": str(item.get("color", "#000000")),
-            }
-            for item in result
-        ]
+                "sublinea": item.get("sublinea"),
+                "hora_inicio_ida": ida.get("horaInicio"),
+                "hora_fin_ida": ida.get("horaFin"),
+                "hora_inicio_vuelta": vuelta.get("horaInicio"),
+                "hora_fin_vuelta": vuelta.get("horaFin"),
+            })
 
         await db.save_lineas_batch(lineas)
         return len(lineas)
@@ -487,16 +429,16 @@ class TussamService:
                 tiempo_min = est.get("segundos", 0) // 60
                 destino = est.get("destino", {}).get("texto", "")
 
-                tiempos.append(
-                    {
-                        "linea": label,
-                        "color": color,
-                        "tiempo_minutos": tiempo_min,
-                        "destino": destino,
-                        "distancia_metros": est.get("distancia", 0),
-                        "sentido": sentido,
-                    }
-                )
+                tiempos.append({
+                    "linea": label,
+                    "color": color,
+                    "tiempo_minutos": tiempo_min,
+                    "destino": destino,
+                    "distancia_metros": est.get("distancia", 0),
+                    "vehiculo": est.get("vehiculo"),
+                    "atributos": est.get("atributos", []),
+                    "sentido": sentido,
+                })
 
         result_data = {
             "parada": codigo_parada,

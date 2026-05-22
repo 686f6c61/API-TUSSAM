@@ -1,11 +1,42 @@
-# TUSSAM API - Documentacion para Desarrolladores
+# TUSSAM API - Documentación para Desarrolladores
 
-API REST de codigo abierto para datos en tiempo real de autobuses TUSSAM (Transportes Urbanos de Sevilla). Optimizada para Apple Watch y apps moviles.
+API REST de código abierto para datos en tiempo real de autobuses TUSSAM (Transportes Urbanos de Sevilla). Optimizada para Apple Watch y apps móviles.
 
-- Datos publicos: paradas, lineas, tiempos de llegada en tiempo real
-- Geocodificacion: cada parada tiene calle, numero, codigo postal
-- Cache inteligente: tiempos se cachean 1 minuto, direcciones 30 dias
-- Documentacion interactiva: `/docs` (Swagger UI) y `/redoc` (ReDoc)
+- Datos públicos: paradas, líneas, tiempos de llegada en tiempo real
+- Geocodificación: cada parada tiene calle, número, código postal
+- Cache inteligente: tiempos se cachean 1 minuto
+- Documentación interactiva: `/docs` (Swagger UI) y `/redoc` (ReDoc)
+
+## Flujo de Datos
+
+```mermaid
+flowchart LR
+    subgraph Origen["Fuentes de Datos"]
+        T["API TUSSAM\nreddelineas.tussam.es"]
+        N["Nominatim\ngeocodificación"]
+    end
+
+    subgraph API["API TUSSAM (FastAPI)"]
+        Cache["Cache SQLite\n(TTL 1 min)"]
+        DB["SQLite\n4 tablas"]
+        EP["Endpoints REST"]
+    end
+
+    subgraph Clientes["Consumidores"]
+        Watch["App AppleWatch"]
+        iOS["App iOS"]
+        Web["Navegador"]
+    end
+
+    T -->|"sync semanal"| DB
+    N -->|"script standalone"| DB
+    Watch -->|"GET /cercanas"| API
+    iOS -->|"GET /cercanas"| API
+    Web -->|"GET /paradas"| API
+    EP --> Cache
+    Cache --> DB
+    Cache -.->|"si expira"| T
+```
 
 ---
 
@@ -159,6 +190,66 @@ Retry-After: 60
 {"detail": "Demasiadas peticiones. Maximo 60/min."}
 ```
 
+### Cabeceras de Rate Limit en cada respuesta
+
+Todas las respuestas incluyen cabeceras con el estado actual del rate limit:
+
+| Cabecera | Descripción |
+|----------|-------------|
+| `X-RateLimit-Limit` | Límite máximo: 60 (dispositivo) o 300 (IP) |
+| `X-RateLimit-Remaining` | Peticiones restantes en la ventana actual |
+| `X-RateLimit-Reset` | Timestamp Unix cuando se reinicia la ventana |
+
+---
+
+## Estructura de Datos de la API de TUSSAM
+
+Esta API actúa como proxy de la API interna de TUSSAM (`reddelineas.tussam.es`). Documentamos aquí la estructura de datos que devuelve la fuente original.
+
+### Campos por estimación (cada bus en camino)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `vehiculo` | int | Identificador único del autobús |
+| `segundos` | int | Segundos hasta llegada a la parada |
+| `distancia` | int | Distancia en metros del bus a la parada |
+| `destino.texto` | string | Nombre de la parada de destino final |
+| `atributos` | array | Lista de características del bus (hoy vacío `[]`) |
+
+### Campo `atributos`
+
+El campo `atributos` es un array de strings reservado para características del vehículo. En todas las pruebas realizadas (mayo 2026) aparece vacío. Cuando TUSSAM lo active, podría contener:
+
+| Valor potencial | Significado |
+|-----------------|-------------|
+| `pisoBajo` | Bus de piso bajo (sin escaleras) |
+| `rampa` | Rampa para silla de ruedas |
+| `wifi` | Conexión WiFi a bordo |
+| `articulado` | Bus articulado (2 vagones) |
+| `hibrido` | Motor híbrido o eléctrico |
+| `aireAcondicionado` | Climatización |
+| `pantalla` | Pantalla informativa interior |
+| `sonoro` | Avisos sonoros de próxima parada |
+
+Nuestra API captura y expone este campo. El día que TUSSAM lo active, aparecerá automáticamente.
+
+### Campos por línea
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `linea` | int | ID numérico de la línea |
+| `labelLinea` | string | Etiqueta visible (ej: "01", "C4") |
+| `sublinea` | int | Variante de la línea |
+| `color` | string | Color corporativo en hex |
+| `destinos[].sentido` | int | 1 = ida, 2 = vuelta |
+| `destinos[].horaInicio` | string | Primera salida del día (HH:MM) |
+| `destinos[].horaFin` | string | Última salida del día (HH:MM) |
+
+### Fuentes consultadas
+
+- API oficial: `reddelineas.tussam.es/API/infotus-ui/`
+- TFG "Big data y analítica de datos. Aplicaciones en movilidad, logística y transportes" — Manuel Jerez González, Universidad de Sevilla
+
 ---
 
 ## Referencia de Endpoints
@@ -205,10 +296,13 @@ curl "http://localhost:8080/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2&beari
       "latitud": 37.391250,
       "longitud": -5.984236,
       "distancia": 66,
-      "bearing": 168,
-      "bearing_diff": 12,
-      "calle": "Calle Recaredo",
-      "direccion_completa": "Calle Recaredo 5",
+       "bearing": null,
+       "bearing_diff": null,
+       "calle": "Calle Recaredo",
+       "numero": "6-7",
+       "codigo_postal": "41003",
+       "municipio": "Sevilla",
+       "direccion": "Calle Recaredo 6-7",
       "tiempos": [
         {
           "linea": "01",
@@ -531,7 +625,12 @@ curl http://localhost:8080/health
 ```
 
 ```json
-{"status": "ok", "paradas_en_db": 967}
+{
+  "status": "ok",
+  "db": "connected",
+  "paradas_en_db": 967,
+  "version": "1.0.0"
+}
 ```
 
 **Errores:**
@@ -614,21 +713,21 @@ curl -X POST http://localhost:8080/sync/paradas-lineas -H "X-API-Key: tu-clave"
 {"message": "Se sincronizaron 1756 relaciones parada-linea"}
 ```
 
-#### `POST /sync/direcciones`
+---
 
-Geocodifica paradas sin direccion usando Nominatim (OpenStreetMap). Solo procesa paradas que aun no tienen `calle` asignada. Tarda ~17 minutos para 967 paradas nuevas (1 peticion/segundo a Nominatim).
+### Geocodificación de direcciones
+
+La geocodificación de calles y números se realiza mediante un script independiente, no desde la API. Esto evita sobrecargar el servicio y permite ejecutarlo solo cuando hay nuevas paradas.
 
 ```bash
-curl -X POST http://localhost:8080/sync/direcciones -H "X-API-Key: tu-clave"
+# Geocodificar paradas sin dirección
+python scripts/geocode_paradas.py
+
+# Simular sin guardar cambios
+python scripts/geocode_paradas.py --dry-run
 ```
 
-```json
-{
-  "message": "Geocodificacion completada",
-  "total": 225,
-  "ok": 224,
-  "errors": 1
-}
+El script usa Nominatim (OpenStreetMap) con rate limiting automático (1 petición/segundo). Las direcciones se guardan directamente en la tabla `paradas`.
 ```
 
 **Errores comunes a todos los endpoints de sync:**

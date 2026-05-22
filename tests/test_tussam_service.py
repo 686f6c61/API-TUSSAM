@@ -240,53 +240,6 @@ async def test_get_with_retry_429(service):
     assert mock_get.call_count == 2
 
 
-# ── get_direccion_from_coords ────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_get_direccion_cache_hit(service, db_ready):
-    """Si hay cache de dirección, no debe hacer petición HTTP."""
-    cached = {"calle": "Calle Test", "numero": "1", "municipio": "Sevilla"}
-    await database.save_direccion_cache(37.389, -5.984, cached)
-
-    result = await service.get_direccion_from_coords(37.389, -5.984)
-    assert result["calle"] == "Calle Test"
-
-
-@pytest.mark.asyncio
-async def test_get_direccion_nominatim(service, db_ready):
-    """Sin cache, debe consultar Nominatim y cachear."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "address": {
-            "road": "Calle Sierpes",
-            "house_number": "10",
-            "postcode": "41004",
-            "city": "Sevilla",
-            "county": "Sevilla",
-        }
-    }
-
-    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = mock_response
-        result = await service.get_direccion_from_coords(37.39, -5.99)
-
-    assert result["calle"] == "Calle Sierpes"
-    assert result["numero"] == "10"
-    assert result["direccion_completa"] == "Calle Sierpes 10"
-
-
-@pytest.mark.asyncio
-async def test_get_direccion_error(service, db_ready):
-    """Si Nominatim falla, devuelve valores por defecto."""
-    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
-        mock_get.side_effect = Exception("Network error")
-        result = await service.get_direccion_from_coords(37.39, -5.99)
-
-    assert result["calle"] == ""
-    assert result["municipio"] == "Sevilla"
-
-
 # ── Líneas ───────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

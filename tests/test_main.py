@@ -50,9 +50,9 @@ async def test_health_ok(db_with_paradas):
 async def test_health_db_unavailable(db_ready, monkeypatch):
     """Health check con DB rota debe devolver 503."""
     async def _broken():
-        raise RuntimeError("DB corrupta")
+        return False
 
-    monkeypatch.setattr(database, "get_all_paradas_from_db", _broken)
+    monkeypatch.setattr(database, "db_health", _broken)
     client = _make_client()
     r = client.get("/health")
     assert r.status_code == 503

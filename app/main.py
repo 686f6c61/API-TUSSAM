@@ -35,9 +35,15 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_sync_key(api_key: str = Security(api_key_header)):
-    """Verifica la API key para endpoints de sincronización."""
+    """
+    Verifica la API key para endpoints de sincronización.
+
+    Usa hmac.compare_digest en lugar de == para prevenir timing attacks:
+    aunque un atacante mida el tiempo de respuesta, no puede deducir la clave.
+    """
     expected = os.getenv("SYNC_API_KEY", "")
     if not expected:
+        # Sin API key configurada → modo desarrollo, endpoints abiertos
         logger.warning("SYNC_API_KEY no configurada — endpoints de sync SIN PROTECCIÓN")
         return
     if not api_key or not hmac.compare_digest(api_key, expected):
@@ -79,19 +85,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return f"ip:{client_ip}", self.ip_limit
 
     async def dispatch(self, request: Request, call_next):
+        """
+        Intercepta cada petición y aplica rate limiting.
+
+        Flujo:
+        1. Determina clave (dispositivo o IP) y límite
+        2. Limpia timestamps expirados de la ventana
+        3. Si se excede el límite → 429 Too Many Requests
+        4. Si no → registra timestamp y continúa
+        """
         key, limit = self._get_key_and_limit(request)
         now = time.time()
 
-        # Limpieza periódica (cada 5 min) o forzada si se excede el límite de buckets
+        # Limpieza periódica: eliminar buckets inactivos para no acumular memoria
+        # Se ejecuta cada 5 minutos o si hay más de 50k buckets (ataque DoS)
         if now - self.last_cleanup > 300 or len(self.buckets) > MAX_BUCKETS:
             stale = [k for k, ts in self.buckets.items() if not ts or now - ts[-1] > self.window]
             for k in stale:
                 del self.buckets[k]
             self.last_cleanup = now
 
-        # Filtrar timestamps dentro de la ventana
+        # Filtrar timestamps: solo nos interesan los de los últimos `window` segundos
         self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
 
+        # ¿Ha superado el límite?
         if len(self.buckets[key]) >= limit:
             return JSONResponse(
                 status_code=429,
@@ -99,6 +116,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": "60"},
             )
 
+        # Registrar esta petición y continuar con el siguiente middleware / endpoint
         self.buckets[key].append(now)
         return await call_next(request)
 
@@ -109,14 +127,12 @@ async def lifespan(app: FastAPI):
     Gestiona el ciclo de vida de la aplicación.
     Se ejecuta al iniciar y al cerrar.
     """
-    # Inicializar base de datos al iniciar
     await database.init_db()
-    # Arrancar scheduler de sincronización semanal
     start_scheduler()
     yield
-    # Parar scheduler y cerrar cliente HTTP al apagar
     stop_scheduler()
     await tussam_service.close()
+    await database.close_db()
 
 
 app = FastAPI(
@@ -146,13 +162,17 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check para Docker/load balancers."""
-    try:
-        paradas = await database.get_all_paradas_from_db()
-        return {"status": "ok", "paradas_en_db": len(paradas)}
-    except Exception as e:
-        logger.error("Health check fallido: %s", e)
+    """Health check para Docker/load balancers. Verifica DB y estado general."""
+    db_ok = await database.db_health()
+    if not db_ok:
         raise HTTPException(status_code=503, detail="DB no disponible")
+    paradas = await database.get_all_paradas_from_db()
+    return {
+        "status": "ok",
+        "db": "connected",
+        "paradas_en_db": len(paradas),
+        "version": "1.0.0",
+    }
 
 
 @app.get("/paradas")
@@ -280,7 +300,11 @@ async def get_paradas_cercanas_con_tiempos(
                 t for t in tiempos_filtrados if t.get("sentido") == sentido
             ]
 
-        # Construir datos de la parada (solo datos de DB, sin geocoding en caliente)
+        # Construir datos de la parada (lee directamente de la tabla paradas)
+        calle = p.get("calle", "") or ""
+        numero = p.get("numero", "") or ""
+        direccion_completa = f"{calle} {numero}".strip() if calle else ""
+        
         parada_data = {
             "codigo": p["codigo"],
             "nombre": p["nombre"],
@@ -289,8 +313,11 @@ async def get_paradas_cercanas_con_tiempos(
             "distancia": p["distancia"],
             "bearing": p.get("bearing"),
             "bearing_diff": p.get("bearing_diff"),
-            "calle": p.get("calle", ""),
-            "direccion_completa": p.get("direccion_completa", ""),
+            "calle": calle,
+            "numero": numero,
+            "codigo_postal": p.get("codigo_postal", ""),
+            "municipio": p.get("municipio", "Sevilla"),
+            "direccion": direccion_completa,
             "tiempos": tiempos_filtrados[:5],
         }
 
