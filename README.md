@@ -1,6 +1,6 @@
 # TUSSAM API
 
-API REST para obtener horarios y paradas de TUSSAM (Transportes Urbanos de Sevilla) en tiempo real. Diseñada para alimentar aplicaciones iOS, Watch y cualquier cliente HTTP.
+API REST para obtener horarios y paradas de TUSSAM (Transportes Urbanos de Sevilla) en tiempo real. Diseñada para alimentar apps, webs, integraciones y cualquier cliente HTTP.
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
@@ -24,7 +24,7 @@ Esta API actúa como **proxy inteligente** que resuelve esos problemas:
 - **Geocodificación inversa** pregrabada: cada parada tiene calle y número.
 - **Reintentos con backoff** para manejar los 429 de TUSSAM.
 - **CORS abierto** para llamadas desde cualquier cliente.
-- **Endpoint optimizado** para AppleWatch: una sola llamada da todo.
+- **Endpoint agregado**: una sola llamada devuelve paradas cercanas y tiempos.
 
 ---
 
@@ -33,9 +33,9 @@ Esta API actúa como **proxy inteligente** que resuelve esos problemas:
 ```mermaid
 flowchart TB
     subgraph Clientes["Clientes"]
-        Watch["Apple Watch"]
-        iPhone["iPhone"]
-        Web["Web / curl"]
+        App["Apps móviles"]
+        Web["Web"]
+        CLI["CLI / servicios"]
     end
 
     subgraph API["API TUSSAM (FastAPI)"]
@@ -55,9 +55,9 @@ flowchart TB
         SQLite["SQLite (WAL)\n967 paradas\n49 líneas\n1.756 relaciones"]
     end
 
-    Watch --> RL
-    iPhone --> RL
+    App --> RL
     Web --> RL
+    CLI --> RL
     RL --> EP
     EP --> Cache
     Cache --> TUSSAM
@@ -72,13 +72,13 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant Watch as Apple Watch
+    participant Cliente as Cliente HTTP
     participant API as TUSSAM API
     participant Cache as SQLite Cache
     participant SQLite as SQLite (paradas)
     participant TUSSAM as API TUSSAM
 
-    Watch->>API: GET /cercanas?lat=37.38&lon=-5.99
+    Cliente->>API: GET /cercanas?lat=37.38&lon=-5.99
 
     API->>SQLite: SELECT * FROM paradas
     SQLite-->>API: 967 paradas
@@ -98,7 +98,7 @@ sequenceDiagram
         end
     end
 
-    API-->>Watch: {ubicacion, paradas: [{...}, direccion, tiempos]}
+    API-->>Cliente: {ubicacion, paradas: [{...}, direccion, tiempos]}
 ```
 
 ---
@@ -210,7 +210,7 @@ uvicorn app.main:app --port 8080
 
 ## Uso
 
-### Petición típica de AppleWatch
+### Petición típica
 
 ```bash
 curl "http://localhost:8081/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2"
@@ -292,7 +292,7 @@ Cuando hay dos paradas en sentidos opuestos (una por cada acera), puedes filtrar
 GET /cercanas?lat=37.3891&lon=-5.9845&bearing=180&bearing_tolerance=45
 ```
 
-Esto devuelve solo las paradas cuya orientación desde el usuario difiere en 45° o menos de 180° (sur). Las paradas en sentido opuesto (bearing ~0°) se descartan. El AppleWatch proporciona el bearing mediante su brújula.
+Esto devuelve solo las paradas cuya orientación desde el usuario difiere en 45° o menos de 180° (sur). Las paradas en sentido opuesto (bearing ~0°) se descartan. El `bearing` puede venir de cualquier cliente con brújula, sensores de orientación o lógica propia.
 
 ---
 
@@ -339,7 +339,7 @@ La API implementa dos niveles de rate limiting para protegerse y proteger a TUSS
 
 | Nivel | Límite | Cabecera | Propósito |
 |-------|--------|----------|-----------|
-| Dispositivo | 60 req/min | `X-Device-ID` | Limitar por AppleWatch/iPhone |
+| Dispositivo | 60 req/min | `X-Device-ID` | Limitar por cliente/dispositivo |
 | IP (fallback) | 300 req/min | Dirección IP | Protección anti-DDoS |
 
 Las cabeceras `X-RateLimit-Remaining`, `X-RateLimit-Limit` y `X-RateLimit-Reset` se incluyen en cada respuesta. Cuando se alcanza el límite, la API responde `429 Too Many Requests` con `Retry-After`. Este limitador es local al proceso; para despliegues con varios workers o réplicas conviene aplicar límites también en el proxy, CDN o balanceador.

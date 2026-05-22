@@ -45,7 +45,7 @@ class TussamService:
             timeout=30.0,
             follow_redirects=True,
             headers={
-                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
                 "Accept": "application/json",
                 "Referer": "https://reddelineas.tussam.es/",
             },

@@ -144,7 +144,7 @@ async def verify_sync_key(api_key: str = Security(api_key_header)):
 
 # --- Rate limiting ---
 # Dos niveles: por dispositivo (X-Device-ID) y por IP (fallback anti-DDoS)
-DEVICE_RATE_LIMIT = 60       # 60 req/min por dispositivo (Watch refresha cada ~10s = 6/min)
+DEVICE_RATE_LIMIT = 60       # 60 req/min por dispositivo (clientes frecuentes ~6/min)
 IP_RATE_LIMIT = 300          # 300 req/min por IP (generoso: muchos usuarios pueden compartir IP)
 MAX_DEVICE_ID_LEN = 64       # Longitud máxima de X-Device-ID (UUID = 36 chars)
 MAX_BUCKETS = 50_000         # Límite de buckets para prevenir DoS por memoria
@@ -158,7 +158,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     - Si el cliente envía X-Device-ID: limita a 60/min por dispositivo
     - Si no: limita a 300/min por IP (protección anti-DDoS bruta)
 
-    El Watch genera un UUID al instalarse y lo envía siempre como header.
+    Un cliente puede generar un UUID al instalarse y enviarlo como header.
     """
 
     def __init__(self, app, device_limit: int = DEVICE_RATE_LIMIT, ip_limit: int = IP_RATE_LIMIT, window: int = 60):
@@ -365,10 +365,10 @@ async def get_paradas_cercanas_con_tiempos(
     incluir_mapa: bool = Query(False, description="Incluir URL de OpenStreetMap"),
 ):
     """
-    Endpoint optimizado para AppleWatch.
+    Endpoint agregado para clientes que necesitan minimizar llamadas HTTP.
 
     Devuelve las paradas cercanas CON sus tiempos de llegada en UNA sola llamada.
-    Este es el endpoint principal para apps móviles y AppleWatch.
+    Este es el endpoint principal para apps, webs e integraciones.
     """
     # Validaciones
     if not (-90 <= lat <= 90):

@@ -1,6 +1,6 @@
 # TUSSAM API - Documentación para Desarrolladores
 
-API REST de código abierto para datos en tiempo real de autobuses TUSSAM (Transportes Urbanos de Sevilla). Optimizada para Apple Watch y apps móviles.
+API REST de código abierto para datos en tiempo real de autobuses TUSSAM (Transportes Urbanos de Sevilla), usable desde apps, webs, scripts y cualquier cliente HTTP.
 
 - Datos públicos: paradas, líneas, tiempos de llegada en tiempo real
 - Geocodificación: cada parada tiene calle, número, código postal
@@ -23,16 +23,16 @@ flowchart LR
     end
 
     subgraph Clientes["Consumidores"]
-        Watch["App AppleWatch"]
-        iOS["App iOS"]
+        App["Apps"]
         Web["Navegador"]
+        CLI["CLI / servicios"]
     end
 
     T -->|"sync semanal"| DB
     N -->|"script standalone"| DB
-    Watch -->|"GET /cercanas"| API
-    iOS -->|"GET /cercanas"| API
+    App -->|"GET /cercanas"| API
     Web -->|"GET /paradas"| API
+    CLI -->|"GET /lineas"| API
     EP --> Cache
     Cache --> DB
     Cache -.->|"si expira"| T
@@ -184,7 +184,7 @@ Dos niveles de limitacion:
 
 El limite por IP es generoso porque muchos dispositivos pueden compartir IP (CGNAT, iCloud Private Relay, WiFi compartida).
 
-**Para apps Watch/movil**: enviar siempre `X-Device-ID` con un UUID unico generado al instalar la app:
+**Para clientes con identificador persistente**: enviar `X-Device-ID` con un UUID único generado al instalar o configurar el cliente:
 
 ```
 X-Device-ID: 550e8400-e29b-41d4-a716-446655440000
@@ -267,7 +267,7 @@ Nuestra API captura y expone este campo. El día que TUSSAM lo active, aparecer�
 
 ### `GET /cercanas`
 
-**Endpoint principal.** Devuelve las paradas mas cercanas CON tiempos de llegada en una sola llamada. Disenado para Apple Watch y apps moviles.
+**Endpoint principal.** Devuelve las paradas mas cercanas CON tiempos de llegada en una sola llamada. Diseñado para clientes que necesitan minimizar llamadas HTTP.
 
 **Parametros:**
 
@@ -1026,7 +1026,7 @@ const sync = await fetch(`${BASE}/sync/all`, {
 console.log(await sync.json());
 ```
 
-### Swift (Apple Watch / iOS)
+### Swift
 
 ```swift
 import Foundation
