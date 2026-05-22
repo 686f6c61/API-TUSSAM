@@ -9,6 +9,7 @@ build/
 # Caches de herramientas
 .pytest_cache/
 .ruff_cache/
+.playwright-cli/
 
 # Entorno
 .env

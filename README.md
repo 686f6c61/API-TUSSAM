@@ -201,6 +201,15 @@ docker compose up -d
 
 La API estará en `http://localhost:8081`. La base de datos con 967 paradas viene incluida en el repositorio y se monta como volumen.
 
+### Smoke test en navegador
+
+```bash
+export SYNC_API_KEY=$(openssl rand -hex 32)
+docker compose --profile smoke up -d --build
+```
+
+Abre `http://localhost:8082`. La app de `examples/smoke-app` permite convertir calle, número y código postal en coordenadas con OpenStreetMap Nominatim y probar `/cercanas` contra el Docker local.
+
 ### Con Python (desarrollo)
 
 ```bash
@@ -411,6 +420,8 @@ TUSSAM/
 │   ├── test_tussam_service.py # 27 tests del servicio
 │   ├── test_scheduler.py     # 8 tests del scheduler
 │   └── test_e2e.py           # 30 tests end-to-end
+├── examples/
+│   └── smoke-app/            # App estática para validar Docker en navegador
 ├── landing/                  # Landing page de la app
 ├── data/                     # Base de datos SQLite (incluida en repo)
 ├── docker-compose.yml
