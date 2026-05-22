@@ -277,6 +277,8 @@ curl "http://localhost:8081/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2"
 | POST | `/sync/lineas` | API Key | Sincronizar líneas |
 | POST | `/sync/all` | API Key | Sincronización completa |
 
+Para clientes móviles, webs o integraciones, el flujo recomendado es usar `/cercanas` cuando se parte de coordenadas. Si el cliente ya conoce el código de una parada, `/paradas/{codigo}/tiempos` mantiene un contrato estable: cuando TUSSAM no responde, devuelve `200` con `tiempos: []` y `upstream_status: "unavailable"` en lugar de propagar un `503`.
+
 Para documentación interactiva en desarrollo: `http://localhost:8081/docs` (Swagger UI) o `/redoc`. En producción se puede desactivar con `ENABLE_DOCS=false`.
 
 ---

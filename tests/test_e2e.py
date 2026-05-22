@@ -182,17 +182,19 @@ class TestFase2_TiemposReales:
 
         r = client.get(f"/paradas/{codigo}/tiempos")
 
-        # Puede ser 200 (OK) o 503 (TUSSAM caída) - ambos son válidos en E2E
-        assert r.status_code in (200, 503), f"Status inesperado: {r.status_code}"
+        assert r.status_code == 200, f"Status inesperado: {r.status_code}"
+        data = r.json()
 
-        if r.status_code == 200:
-            data = r.json()
+        # Estructura obligatoria
+        assert "parada" in data
+        assert "tiempos" in data
+        assert data["parada"] == codigo
 
-            # Estructura obligatoria
-            assert "parada" in data
-            assert "tiempos" in data
-            assert data["parada"] == codigo
-
+        if data.get("upstream_status") == "unavailable":
+            assert data["tiempos"] == []
+            assert "upstream_detail" in data
+            print(f"    ⚠ Parada {codigo}: TUSSAM API no disponible; payload estable")
+        else:
             # Validar cada tiempo
             for t in data["tiempos"]:
                 assert "linea" in t, f"Falta 'linea' en tiempo: {t}"
@@ -212,8 +214,6 @@ class TestFase2_TiemposReales:
             print(f"    ✓ Parada {codigo}: {n_tiempos} buses en camino")
             for t in data["tiempos"][:3]:
                 print(f"      Línea {t['linea']} → {t['destino']} en {t['tiempo_minutos']} min")
-        else:
-            print(f"    ⚠ Parada {codigo}: TUSSAM API no disponible (503)")
 
         # Delay antes de la siguiente petición
         time.sleep(DELAY)

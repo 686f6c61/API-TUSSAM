@@ -6,6 +6,13 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) y el v
 
 ---
 
+## [1.0.4] - 2026-05-22
+
+### Mejorado
+
+- `GET /paradas/{codigo}/tiempos` ya no propaga un `503` cuando TUSSAM no está disponible: devuelve `200` con `tiempos: []` y metadata `upstream_status` para mantener estable el contrato de la app.
+- Actualizada la documentación del endpoint de tiempos para distinguir caídas de upstream de errores internos.
+
 ## [1.0.3] - 2026-05-22
 
 ### Añadido

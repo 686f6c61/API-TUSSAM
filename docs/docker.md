@@ -21,7 +21,7 @@ docker compose up -d
 
 # Verificar
 curl http://localhost:8081/health
-# {"status":"ok","db":"connected","paradas_en_db":967,"version":"1.0.2"}
+# {"status":"ok","db":"connected","paradas_en_db":967,"version":"1.0.4"}
 ```
 
 La API estará disponible en `http://localhost:8081`. La base de datos incluida (`data/tussam.db`) ya contiene 967 paradas, 49 líneas y 1.756 relaciones.

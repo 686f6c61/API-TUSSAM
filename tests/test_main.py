@@ -132,13 +132,17 @@ async def test_get_tiempos(db_ready):
 
 
 @pytest.mark.asyncio
-async def test_get_tiempos_api_caida(db_ready):
-    """Si TUSSAM API falla con error HTTP, devolver 503."""
+async def test_get_tiempos_api_caida(db_with_paradas):
+    """Si TUSSAM API falla con error HTTP, devolver payload estable para la app."""
     client = _make_client()
     with patch("app.main.tussam_service.get_tiempos_parada", new_callable=AsyncMock) as mock:
         mock.side_effect = httpx.ConnectError("TUSSAM API down")
         r = client.get("/paradas/43/tiempos")
-    assert r.status_code == 503
+    data = r.json()
+    assert r.status_code == 200
+    assert data["parada"] == "43"
+    assert data["tiempos"] == []
+    assert data["upstream_status"] == "unavailable"
 
 
 @pytest.mark.asyncio

@@ -269,6 +269,8 @@ Nuestra API captura y expone este campo. El día que TUSSAM lo active, aparecer�
 
 **Endpoint principal.** Devuelve las paradas mas cercanas CON tiempos de llegada en una sola llamada. Diseñado para clientes que necesitan minimizar llamadas HTTP.
 
+Para apps, webs e integraciones que parten de coordenadas, este es el endpoint recomendado. Si el cliente ya conoce el codigo de una parada, puede usar `GET /paradas/{codigo}/tiempos`; ese endpoint tambien evita propagar caidas de TUSSAM al cliente.
+
 **Parametros:**
 
 | Parametro | Tipo | Obligatorio | Default | Rango | Descripcion |
@@ -533,6 +535,19 @@ curl http://localhost:8080/paradas/889/tiempos
 - `tiempo_minutos` puede ser **negativo** (ej: -30 indica bus ya en la parada o proximo a salir).
 - `sentido`: `null` cuando la parada tiene esa linea en ambos sentidos (~15% de los casos). Usar el campo `destino` para distinguir.
 - Si TUSSAM falla y existe cache reciente pero expirada, la respuesta incluye `stale: true` y `cached_at`.
+- Si TUSSAM falla y no hay cache utilizable, la respuesta sigue siendo `200` con `tiempos: []`, `upstream_status: "unavailable"` y `upstream_detail`. Esto evita que una app falle por una caída o bloqueo temporal de upstream.
+
+```json
+{
+  "parada": "889",
+  "nombre": "Recaredo (San Roque)",
+  "latitud": 37.391250,
+  "longitud": -5.984236,
+  "tiempos": [],
+  "upstream_status": "unavailable",
+  "upstream_detail": "TUSSAM API no disponible. Inténtalo en unos segundos."
+}
+```
 
 **Diferencia con `/cercanas`:** este endpoint devuelve hasta **10** tiempos por parada. `/cercanas` devuelve maximo **5**.
 
@@ -540,10 +555,10 @@ curl http://localhost:8080/paradas/889/tiempos
 
 | Codigo | Cuando |
 |--------|--------|
+| 404 | Parada con ese codigo no existe |
 | 500 | Error inesperado interno |
-| 503 | API de TUSSAM no disponible (timeout, error HTTP) |
 
-> **Nota:** a diferencia de `/cercanas` (que siempre devuelve 200), este endpoint **propaga errores** como 503.
+> **Nota:** igual que `/cercanas`, este endpoint evita propagar errores operativos de TUSSAM al cliente. La disponibilidad de upstream se comunica en el cuerpo de la respuesta.
 
 ---
 
@@ -642,7 +657,7 @@ curl http://localhost:8080/health
   "status": "ok",
   "db": "connected",
   "paradas_en_db": 967,
-  "version": "1.0.2"
+  "version": "1.0.4"
 }
 ```
 
@@ -663,7 +678,7 @@ curl http://localhost:8080/
 ```
 
 ```json
-{"message": "TUSSAM API", "version": "1.0.2", "docs": "/docs"}
+{"message": "TUSSAM API", "version": "1.0.4", "docs": "/docs"}
 ```
 
 ---
@@ -881,7 +896,7 @@ Compatible con librerias de mapas como Leaflet, Mapbox GL y OpenLayers.
 | 422 | Validacion fallida | Parametro fuera de rango (radio > 2000, max_paradas > 10, bearing_tolerance > 180, tiempo_max < 0) |
 | 429 | Rate limit excedido | Mas de 60 req/min por dispositivo o 300 req/min por IP |
 | 500 | Error interno | Error inesperado en `GET /paradas/{codigo}/tiempos` |
-| 503 | Servicio no disponible | API de TUSSAM caida o base de datos no accesible |
+| 503 | Servicio no disponible | Base de datos no accesible o endpoints de sync sin `SYNC_API_KEY` configurada |
 
 Todas las respuestas de error siguen el formato:
 

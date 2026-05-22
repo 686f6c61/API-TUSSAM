@@ -6,7 +6,7 @@ Puntos de entrada (endpoints) de la API.
 Expone los servicios de TUSSAM a través de HTTP.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.2
+Versión: 1.0.4
 Licencia: MIT
 """
 
@@ -32,7 +32,7 @@ from app.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger("tussam.api")
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.4"
 DEFAULT_SYNC_API_KEY = "cambia-esta-clave"
 
 
@@ -110,6 +110,8 @@ class TiemposParadaOut(BaseModel):
     tiempos: list[TiempoOut]
     stale: bool | None = None
     cached_at: str | None = None
+    upstream_status: str | None = None
+    upstream_detail: str | None = None
 
 # --- Autenticación para endpoints de sync ---
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -502,10 +504,18 @@ async def get_tiempos(codigo: str):
         return await tussam_service.get_tiempos_parada(codigo)
     except (httpx.HTTPError, httpx.TimeoutException) as e:
         logger.warning("TUSSAM API error para parada %s: %s", codigo, e)
-        raise HTTPException(
-            status_code=503,
-            detail="TUSSAM API no disponible. Inténtalo en unos segundos.",
-        )
+        parada = await tussam_service.get_parada_by_codigo(codigo)
+        if not parada:
+            raise HTTPException(status_code=404, detail="Parada no encontrada")
+        return {
+            "parada": codigo,
+            "nombre": parada["nombre"],
+            "latitud": parada["latitud"],
+            "longitud": parada["longitud"],
+            "tiempos": [],
+            "upstream_status": "unavailable",
+            "upstream_detail": "TUSSAM API no disponible. Inténtalo en unos segundos.",
+        }
     except Exception:
         logger.exception("Error inesperado obteniendo tiempos para parada %s", codigo)
         raise HTTPException(status_code=500, detail="Error interno")

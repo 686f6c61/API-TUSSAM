@@ -11,7 +11,7 @@ Gestión de SQLite para almacenar:
 Usa una conexión persistente en modo WAL para mejor rendimiento en lecturas concurrentes.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.2
+Versión: 1.0.4
 Licencia: MIT
 """
 

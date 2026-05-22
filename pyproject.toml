@@ -1,6 +1,6 @@
 [project]
 name = "tussam-api"
-version = "1.0.2"
+version = "1.0.4"
 description = "API para horarios y paradas de TUSSAM (Sevilla)"
 readme = "README.md"
 requires-python = ">=3.11"
