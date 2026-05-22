@@ -4,7 +4,7 @@ API REST de código abierto para datos en tiempo real de autobuses TUSSAM (Trans
 
 - Datos públicos: paradas, líneas, tiempos de llegada en tiempo real
 - Geocodificación: cada parada tiene calle, número, código postal
-- Cache inteligente: tiempos se cachean 1 minuto
+- Cache inteligente: tiempos se cachean 1 minuto, con fallback temporal si TUSSAM falla
 - Documentación interactiva: `/docs` (Swagger UI) y `/redoc` (ReDoc)
 
 ## Flujo de Datos
@@ -17,7 +17,7 @@ flowchart LR
     end
 
     subgraph API["API TUSSAM (FastAPI)"]
-        Cache["Cache SQLite\n(TTL 1 min)"]
+        Cache["Cache SQLite\n(TTL fresco 1 min)"]
         DB["SQLite\n4 tablas"]
         EP["Endpoints REST"]
     end
@@ -35,7 +35,7 @@ flowchart LR
     CLI -->|"GET /lineas"| API
     EP --> Cache
     Cache --> DB
-    Cache -.->|"si expira"| T
+    Cache -.->|"si expira y no hay otra petición en curso"| T
 ```
 
 ---
@@ -365,8 +365,9 @@ curl "http://localhost:8080/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2&beari
 
 **Comportamiento importante:**
 
-- Si TUSSAM esta caida, `/cercanas` **siempre devuelve 200**. Las paradas aparecen con `"tiempos": []`.
+- Si TUSSAM esta caida, `/cercanas` **siempre devuelve 200**. Cuando no hay cache utilizable, las paradas aparecen con `"tiempos": []`.
 - Los tiempos se cachean **1 minuto**. Peticiones repetidas en ese intervalo no golpean la API de TUSSAM.
+- Las peticiones simultaneas a una misma parada comparten una sola llamada saliente.
 - Los campos `numero`, `codigo_postal`, `municipio`, `provincia`, `comunidad_autonoma` y `updated_at` **no se incluyen** en `/cercanas`. Para obtenerlos, usar `GET /paradas/{codigo}`.
 - El filtro `lineas` convierte automaticamente a mayusculas (`c4` → `C4`).
 - El filtro `tiempo_max` excluye tiempos negativos (buses ya en la parada).
@@ -531,6 +532,7 @@ curl http://localhost:8080/paradas/889/tiempos
 - Maximo **10** tiempos por parada, ordenados por `tiempo_minutos` ascendente.
 - `tiempo_minutos` puede ser **negativo** (ej: -30 indica bus ya en la parada o proximo a salir).
 - `sentido`: `null` cuando la parada tiene esa linea en ambos sentidos (~15% de los casos). Usar el campo `destino` para distinguir.
+- Si TUSSAM falla y existe cache reciente pero expirada, la respuesta incluye `stale: true` y `cached_at`.
 
 **Diferencia con `/cercanas`:** este endpoint devuelve hasta **10** tiempos por parada. `/cercanas` devuelve maximo **5**.
 
@@ -640,7 +642,7 @@ curl http://localhost:8080/health
   "status": "ok",
   "db": "connected",
   "paradas_en_db": 967,
-  "version": "1.0.1"
+  "version": "1.0.2"
 }
 ```
 
@@ -661,7 +663,7 @@ curl http://localhost:8080/
 ```
 
 ```json
-{"message": "TUSSAM API", "version": "1.0.1", "docs": "/docs"}
+{"message": "TUSSAM API", "version": "1.0.2", "docs": "/docs"}
 ```
 
 ---
@@ -1111,9 +1113,9 @@ TUSSAM/
 │   └── tussam.db             # SQLite con datos precargados (967 paradas, 49 lineas)
 ├── tests/
 │   ├── conftest.py           # Fixtures compartidas
-│   ├── test_database.py      # 23 tests de base de datos
-│   ├── test_main.py          # 34 tests de endpoints
-│   ├── test_tussam_service.py # 26 tests del servicio
+│   ├── test_database.py      # 22 tests de base de datos
+│   ├── test_main.py          # 39 tests de endpoints
+│   ├── test_tussam_service.py # 27 tests del servicio
 │   ├── test_scheduler.py     # 8 tests del scheduler
 │   └── test_e2e.py           # 30 tests end-to-end con API real
 ├── docs/
@@ -1137,7 +1139,7 @@ TUSSAM/
 
 ### Fuentes de datos
 
-1. **API de TUSSAM** (`reddelineas.tussam.es`): paradas, lineas, tiempos de llegada en tiempo real. Rate limit estricto (429 si se supera). La API usa reintentos con backoff exponencial.
+1. **API de TUSSAM** (`reddelineas.tussam.es`): paradas, lineas, tiempos de llegada en tiempo real. Rate limit estricto (429 si se supera). La API usa single-flight por parada, límite de concurrencia saliente, reintentos con backoff y respeta `Retry-After`.
 
 2. **Nominatim** (OpenStreetMap): geocodificacion inversa (coordenadas GPS → calle, numero, codigo postal). Limite: 1 peticion/segundo. Los resultados se cachean 30 dias.
 
@@ -1151,6 +1153,10 @@ TUSSAM/
 | `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
 | `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
 | `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
+| `TIEMPOS_CACHE_TTL_SECONDS` | `60` | TTL de cache fresca para tiempos |
+| `TIEMPOS_STALE_TTL_SECONDS` | `600` | Tiempo máximo de cache antigua si TUSSAM falla |
+| `TUSSAM_MAX_CONCURRENT_REQUESTS` | `4` | Concurrencia saliente máxima hacia TUSSAM |
+| `TUSSAM_SYNC_REQUEST_DELAY_SECONDS` | `0.2` | Pausa entre peticiones de sincronización |
 | `SYNC_ENABLED` | `true` | Activar scheduler de sync semanal |
 | `SYNC_DAY` | `sun` | Dia de sincronizacion |
 | `SYNC_HOUR` | `4` | Hora UTC |

@@ -20,9 +20,11 @@ TUSSAM ofrece una API interna en `reddelineas.tussam.es` con las siguientes limi
 Esta API actúa como **proxy inteligente** que resuelve esos problemas:
 
 - **Cacheo automático** de tiempos de llegada (TTL: 1 minuto).
+- **Single-flight por parada**: peticiones simultáneas comparten una sola llamada a TUSSAM.
+- **Fallback con cache antigua** si TUSSAM falla temporalmente.
 - **Normalización** de coordenadas (÷ 10⁶ → grados decimales).
 - **Geocodificación inversa** pregrabada: cada parada tiene calle y número.
-- **Reintentos con backoff** para manejar los 429 de TUSSAM.
+- **Reintentos con backoff y `Retry-After`** para manejar los 429 de TUSSAM.
 - **CORS abierto** para llamadas desde cualquier cliente.
 - **Endpoint agregado**: una sola llamada devuelve paradas cercanas y tiempos.
 
@@ -43,7 +45,7 @@ flowchart TB
         RL["Rate Limiter\n(dispositivo + IP)"]
         Auth["API Key Auth\n(solo sync)"]
         EP["Endpoints REST\n/cercanas, /paradas, ..."]
-        Cache["Cache tiempos\n(SQLite, TTL 1 min)"]
+        Cache["Cache tiempos\n(SQLite, TTL fresco 1 min)"]
     end
 
     subgraph Externo["APIs Externas"]
@@ -61,6 +63,7 @@ flowchart TB
     RL --> EP
     EP --> Cache
     Cache --> TUSSAM
+    Cache -.->|"fallback si TUSSAM falla"| EP
     EP --> SQLite
     Auth --> EP
 
@@ -91,10 +94,12 @@ sequenceDiagram
         API->>Cache: ¿tiempos cacheados?
         alt Cache hit (< 1 min)
             Cache-->>API: tiempos cacheados
-        else Cache miss
+        else Cache miss / expirado
             API->>TUSSAM: GET /API/infotus-ui/tiempos/{codigo}
-            TUSSAM-->>API: tiempos en segundos
+            TUSSAM-->>API: tiempos en segundos o 429/5xx
             API->>Cache: guardar en cache
+        else TUSSAM no disponible y hay cache antigua
+            Cache-->>API: tiempos stale
         end
     end
 
@@ -372,6 +377,10 @@ curl -X POST http://localhost:8081/sync/all -H "X-API-Key: mi-clave-segura"
 | `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
 | `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
 | `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
+| `TIEMPOS_CACHE_TTL_SECONDS` | `60` | TTL de cache fresca para tiempos de llegada |
+| `TIEMPOS_STALE_TTL_SECONDS` | `600` | Tiempo máximo para devolver cache antigua si TUSSAM falla |
+| `TUSSAM_MAX_CONCURRENT_REQUESTS` | `4` | Límite de concurrencia saliente hacia TUSSAM |
+| `TUSSAM_SYNC_REQUEST_DELAY_SECONDS` | `0.2` | Pausa entre peticiones de sincronización a TUSSAM |
 | `SYNC_ENABLED` | `true` | Activar scheduler semanal |
 | `SYNC_DAY` | `sun` | Día de la semana para sync |
 | `SYNC_HOUR` | `4` | Hora UTC para sync |
@@ -397,9 +406,9 @@ TUSSAM/
 │   └── docker.md            # Guía de despliegue con Docker
 ├── tests/
 │   ├── conftest.py           # Fixtures compartidos
-│   ├── test_database.py      # 23 tests de base de datos
-│   ├── test_main.py          # 36 tests de endpoints
-│   ├── test_tussam_service.py # 19 tests del servicio
+│   ├── test_database.py      # 22 tests de base de datos
+│   ├── test_main.py          # 39 tests de endpoints
+│   ├── test_tussam_service.py # 27 tests del servicio
 │   ├── test_scheduler.py     # 8 tests del scheduler
 │   └── test_e2e.py           # 30 tests end-to-end
 ├── landing/                  # Landing page de la app
@@ -438,7 +447,7 @@ pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_scheduler.py
 pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_scheduler.py --cov=app
 ```
 
-78 tests cubren:
+88 tests unitarios cubren:
 - **Base de datos**: esquema, CRUD, cache, migraciones, transacciones
 - **Endpoints**: todas las rutas, códigos HTTP, validación de parámetros, GeoJSON
 - **Servicio TUSSAM**: paradas cercanas, bearing, rate limiting, sync

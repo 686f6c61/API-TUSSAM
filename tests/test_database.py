@@ -219,3 +219,25 @@ async def test_tiempos_cache_expired(db_ready):
 
     cached = await database.get_cached_tiempos("43")
     assert cached is None
+
+
+@pytest.mark.asyncio
+async def test_tiempos_stale_cache_returns_metadata(db_ready):
+    """La cache antigua puede usarse como fallback con metadatos explícitos."""
+    import aiosqlite
+
+    tiempos = {"parada": "43", "nombre": "Recaredo", "tiempos": []}
+    stale_time = datetime.now() - timedelta(minutes=5)
+
+    async with aiosqlite.connect(database.DATABASE_URL) as conn:
+        await conn.execute(
+            "INSERT INTO tiempos_cache (parada_codigo, tiempos_json, cached_at) VALUES (?, ?, ?)",
+            ("43", json.dumps(tiempos), stale_time.isoformat(timespec="seconds")),
+        )
+        await conn.commit()
+
+    cached = await database.get_stale_cached_tiempos("43")
+    assert cached is not None
+    assert cached["parada"] == "43"
+    assert cached["stale"] is True
+    assert "cached_at" in cached

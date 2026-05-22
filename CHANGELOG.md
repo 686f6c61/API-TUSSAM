@@ -6,6 +6,19 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) y el v
 
 ---
 
+## [1.0.2] - 2026-05-22
+
+### Añadido
+
+- Single-flight por parada para deduplicar peticiones simultáneas de tiempos.
+- Fallback con cache antigua cuando TUSSAM no responde y hay datos recientes disponibles.
+- Variables de entorno para ajustar TTL de cache, cache antigua, concurrencia saliente y pausa de sincronización.
+
+### Mejorado
+
+- El cliente TUSSAM respeta `Retry-After` en respuestas 429/5xx y limita la concurrencia saliente.
+- Los syncs de paradas y líneas usan la misma capa de reintentos que los tiempos en tiempo real.
+
 ## [1.0.1] - 2026-05-22
 
 ### Seguridad

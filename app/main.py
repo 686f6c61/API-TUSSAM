@@ -6,7 +6,7 @@ Puntos de entrada (endpoints) de la API.
 Expone los servicios de TUSSAM a través de HTTP.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.1
+Versión: 1.0.2
 Licencia: MIT
 """
 
@@ -32,7 +32,7 @@ from app.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger("tussam.api")
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 DEFAULT_SYNC_API_KEY = "cambia-esta-clave"
 
 
@@ -108,6 +108,8 @@ class TiemposParadaOut(BaseModel):
     latitud: float | None = None
     longitud: float | None = None
     tiempos: list[TiempoOut]
+    stale: bool | None = None
+    cached_at: str | None = None
 
 # --- Autenticación para endpoints de sync ---
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -489,7 +491,11 @@ async def get_parada(codigo: str):
     return parada
 
 
-@app.get("/paradas/{codigo}/tiempos", response_model=TiemposParadaOut)
+@app.get(
+    "/paradas/{codigo}/tiempos",
+    response_model=TiemposParadaOut,
+    response_model_exclude_none=True,
+)
 async def get_tiempos(codigo: str):
     """Obtiene los tiempos de llegada de autobuses a una parada."""
     try:

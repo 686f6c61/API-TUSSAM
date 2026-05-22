@@ -11,12 +11,13 @@ Gestión de SQLite para almacenar:
 Usa una conexión persistente en modo WAL para mejor rendimiento en lecturas concurrentes.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.1
+Versión: 1.0.2
 Licencia: MIT
 """
 
 import aiosqlite
 import logging
+import os
 from typing import List, Optional
 from datetime import datetime, timedelta
 import math
@@ -24,9 +25,21 @@ import json
 
 logger = logging.getLogger("tussam.database")
 
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Lee enteros de entorno con mínimo para evitar valores inválidos."""
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        logger.warning("%s inválido; usando %d", name, default)
+        return default
+    return max(minimum, value)
+
+
 # Configuración
 DATABASE_URL = "data/tussam.db"
-CACHE_TTL_MINUTES = 1
+CACHE_TTL_SECONDS = _env_int("TIEMPOS_CACHE_TTL_SECONDS", 60)
+STALE_CACHE_TTL_SECONDS = _env_int("TIEMPOS_STALE_TTL_SECONDS", 600)
 
 # Conexión persistente (se inicializa en startup, se cierra en shutdown)
 _db: Optional[aiosqlite.Connection] = None
@@ -362,8 +375,41 @@ def bounding_box(lat: float, lon: float, radio_m: float) -> tuple:
 async def get_cached_tiempos(parada_codigo: str) -> Optional[dict]:
     """
     Obtiene los tiempos de llegada cacheados para una parada.
-    Devuelve None si no existe o ha expirado (TTL: 1 minuto).
+    Devuelve None si no existe o ha expirado.
     """
+    return await _get_tiempos_cache(
+        parada_codigo,
+        max_age_seconds=CACHE_TTL_SECONDS,
+        include_metadata=False,
+    )
+
+
+async def get_stale_cached_tiempos(
+    parada_codigo: str,
+    max_age_seconds: int = STALE_CACHE_TTL_SECONDS,
+) -> Optional[dict]:
+    """
+    Obtiene cache expirada como fallback si TUSSAM no responde.
+
+    La respuesta incluye metadatos para que los clientes puedan distinguir datos
+    antiguos de una consulta fresca.
+    """
+    cached = await _get_tiempos_cache(
+        parada_codigo,
+        max_age_seconds=max_age_seconds,
+        include_metadata=True,
+    )
+    if cached is None:
+        return None
+    cached["stale"] = True
+    return cached
+
+
+async def _get_tiempos_cache(
+    parada_codigo: str,
+    max_age_seconds: int,
+    include_metadata: bool,
+) -> Optional[dict]:
     db = await get_db()
     db.row_factory = aiosqlite.Row
     async with db.execute(
@@ -372,9 +418,12 @@ async def get_cached_tiempos(parada_codigo: str) -> Optional[dict]:
         row = await cursor.fetchone()
         if row:
             cached_at = datetime.fromisoformat(row["cached_at"])
-            if datetime.now() - cached_at < timedelta(minutes=CACHE_TTL_MINUTES):
+            if datetime.now() - cached_at <= timedelta(seconds=max_age_seconds):
                 try:
-                    return json.loads(row["tiempos_json"])
+                    data = json.loads(row["tiempos_json"])
+                    if include_metadata:
+                        data["cached_at"] = row["cached_at"]
+                    return data
                 except json.JSONDecodeError:
                     logger.error("Cache corrupto para parada %s, eliminando", parada_codigo)
                     await db.execute(

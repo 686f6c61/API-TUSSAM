@@ -21,7 +21,7 @@ docker compose up -d
 
 # Verificar
 curl http://localhost:8081/health
-# {"status":"ok","db":"connected","paradas_en_db":967,"version":"1.0.1"}
+# {"status":"ok","db":"connected","paradas_en_db":967,"version":"1.0.2"}
 ```
 
 La API estará disponible en `http://localhost:8081`. La base de datos incluida (`data/tussam.db`) ya contiene 967 paradas, 49 líneas y 1.756 relaciones.
@@ -101,6 +101,10 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 | `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
 | `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
 | `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
+| `TIEMPOS_CACHE_TTL_SECONDS` | `60` | TTL de cache fresca para tiempos de llegada |
+| `TIEMPOS_STALE_TTL_SECONDS` | `600` | Tiempo máximo para devolver cache antigua si TUSSAM falla |
+| `TUSSAM_MAX_CONCURRENT_REQUESTS` | `4` | Límite de concurrencia saliente hacia TUSSAM |
+| `TUSSAM_SYNC_REQUEST_DELAY_SECONDS` | `0.2` | Pausa entre peticiones de sincronización a TUSSAM |
 | `SYNC_ENABLED` | `true` | Activar sincronización semanal automática |
 | `SYNC_DAY` | `sun` | Día de la semana (`mon`-`sun`) |
 | `SYNC_HOUR` | `4` | Hora UTC (0-23) |

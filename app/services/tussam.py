@@ -10,7 +10,7 @@ Gestiona:
 - Sincronización de datos
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.1
+Versión: 1.0.2
 Licencia: MIT
 """
 
@@ -21,6 +21,7 @@ import app.database as db
 import logging
 import asyncio
 import math
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +29,26 @@ logger = logging.getLogger(__name__)
 # URLs de las APIs externas
 BASE_URL = "https://reddelineas.tussam.es"
 NOMINATIM_API_URL = "https://nominatim.openstreetmap.org/reverse"
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Lee enteros de entorno con mínimo para evitar configuración peligrosa."""
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        logger.warning("%s inválido; usando %d", name, default)
+        return default
+    return max(minimum, value)
+
+
+def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
+    """Lee floats de entorno con mínimo para pausas y timeouts."""
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        logger.warning("%s inválido; usando %.2f", name, default)
+        return default
+    return max(minimum, value)
 
 
 class TussamService:
@@ -41,6 +62,17 @@ class TussamService:
     """
 
     def __init__(self):
+        self.max_concurrent_tussam_requests = _env_int(
+            "TUSSAM_MAX_CONCURRENT_REQUESTS", 4
+        )
+        self.sync_request_delay_seconds = _env_float(
+            "TUSSAM_SYNC_REQUEST_DELAY_SECONDS", 0.2
+        )
+        self._tussam_semaphore = asyncio.Semaphore(
+            self.max_concurrent_tussam_requests
+        )
+        self._tiempos_locks: dict[str, asyncio.Lock] = {}
+        self._tiempos_locks_guard = asyncio.Lock()
         self.client = httpx.AsyncClient(
             timeout=30.0,
             follow_redirects=True,
@@ -95,8 +127,7 @@ class TussamService:
 
         # Paso 1: obtener la lista de líneas activas
         url_lineas = f"{self.base_url}/API/infotus-ui/lineas/{fh}"
-        response = await self.client.get(url_lineas)
-        response.raise_for_status()
+        response = await self._get_with_retry(url_lineas)
 
         data_lineas = response.json()
         lineas_data = data_lineas.get("result", {})
@@ -115,8 +146,7 @@ class TussamService:
             for sentido in [1, 2]:
                 try:
                     url_nodos = f"{self.base_url}/API/infotus-ui/nodosLinea/{linea_num}/{sentido}/{fh}"
-                    resp = await self.client.get(url_nodos)
-                    resp.raise_for_status()
+                    resp = await self._get_with_retry(url_nodos)
                     data_nodos = resp.json()
                     nodos = data_nodos.get("result", [])
 
@@ -144,6 +174,7 @@ class TussamService:
                         f"Error fetching nodos for linea {linea_num} sentido {sentido}: {e}"
                     )
                     continue
+                await asyncio.sleep(self.sync_request_delay_seconds)
 
         logger.info(f"Total unique paradas found: {len(todas_paradas)}")
         await db.save_paradas_batch(list(todas_paradas.values()))
@@ -262,8 +293,7 @@ class TussamService:
         fh = self._format_datetime()
         url = f"{self.base_url}/API/infotus-ui/lineas/{fh}"
 
-        response = await self.client.get(url)
-        response.raise_for_status()
+        response = await self._get_with_retry(url)
 
         data = response.json()
         result_data = data.get("result", {})
@@ -304,11 +334,16 @@ class TussamService:
         Raises:
             httpx.HTTPStatusError: Si falla tras todos los reintentos
         """
-        retryable = {429, 500, 502, 503}
+        retryable = {429, 500, 502, 503, 504}
+        last_response = None
         for attempt in range(max_retries):
-            resp = await self.client.get(url)
+            async with self._tussam_semaphore:
+                resp = await self.client.get(url)
+            last_response = resp
             if resp.status_code in retryable:
-                wait = 2 ** (attempt + 1)
+                if attempt == max_retries - 1:
+                    break
+                wait = self._retry_wait_seconds(resp, attempt)
                 logger.warning(
                     "HTTP %d de %s, reintentando en %ds (%d/%d)",
                     resp.status_code, url, wait, attempt + 1, max_retries,
@@ -317,9 +352,26 @@ class TussamService:
                 continue
             resp.raise_for_status()
             return resp
-        logger.error("Reintentos agotados para %s (último: %d)", url, resp.status_code)
-        resp.raise_for_status()
-        return resp
+        if last_response is None:
+            raise httpx.HTTPError(f"No se intentó la petición a {url}")
+        logger.error(
+            "Reintentos agotados para %s (último: %d)",
+            url,
+            last_response.status_code,
+        )
+        last_response.raise_for_status()
+        return last_response
+
+    def _retry_wait_seconds(self, response: httpx.Response, attempt: int) -> int:
+        """Respeta Retry-After cuando TUSSAM lo envía; si no, usa backoff."""
+        headers = getattr(response, "headers", {}) or {}
+        retry_after = headers.get("Retry-After") if hasattr(headers, "get") else None
+        if isinstance(retry_after, str) and retry_after:
+            try:
+                return max(1, min(60, int(retry_after)))
+            except ValueError:
+                logger.debug("Retry-After no entero ignorado: %s", retry_after)
+        return 2 ** (attempt + 1)
 
     async def sync_paradas_lineas_from_api(self) -> int:
         """
@@ -364,7 +416,7 @@ class TussamService:
                             })
                 except Exception as e:
                     logger.warning(f"Error nodos linea {label} sentido {sentido}: {e}")
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(self.sync_request_delay_seconds)
 
         await db.save_paradas_lineas_batch(relaciones)
         logger.info(f"Synced {len(relaciones)} parada-linea relations")
@@ -401,8 +453,39 @@ class TussamService:
                 logger.info(f"Returning cached tiempos for parada {codigo_parada}")
                 return cached
 
+        lock = await self._get_tiempos_lock(codigo_parada)
+        async with lock:
+            if not force_refresh:
+                cached = await db.get_cached_tiempos(codigo_parada)
+                if cached:
+                    logger.info(
+                        "Returning cached tiempos after wait for parada %s",
+                        codigo_parada,
+                    )
+                    return cached
+
+            return await self._fetch_and_cache_tiempos(codigo_parada)
+
+    async def _get_tiempos_lock(self, codigo_parada: str) -> asyncio.Lock:
+        """Devuelve un lock estable por parada para deduplicar peticiones."""
+        async with self._tiempos_locks_guard:
+            return self._tiempos_locks.setdefault(codigo_parada, asyncio.Lock())
+
+    async def _fetch_and_cache_tiempos(self, codigo_parada: str) -> dict:
+        """Consulta TUSSAM para una parada y guarda la respuesta en cache."""
         url = f"{self.base_url}/API/infotus-ui/tiempos/{codigo_parada}"
-        response = await self._get_with_retry(url)
+        stale = await db.get_stale_cached_tiempos(codigo_parada)
+        try:
+            max_retries = 1 if stale else 3
+            response = await self._get_with_retry(url, max_retries=max_retries)
+        except (httpx.HTTPError, httpx.TimeoutException):
+            if stale:
+                logger.warning(
+                    "TUSSAM no disponible para parada %s; devolviendo cache stale",
+                    codigo_parada,
+                )
+                return stale
+            raise
 
         data = response.json()
         result = self._normalize_tiempos_result(data.get("result"), codigo_parada)

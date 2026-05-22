@@ -128,6 +128,7 @@ async def test_get_tiempos(db_ready):
         r = client.get("/paradas/43/tiempos")
     assert r.status_code == 200
     assert r.json()["tiempos"][0]["linea"] == "01"
+    assert "stale" not in r.json()
 
 
 @pytest.mark.asyncio

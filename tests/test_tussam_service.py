@@ -5,7 +5,11 @@ Mockea las peticiones HTTP para no depender de la API externa.
 """
 
 import pytest
+import asyncio
+import httpx
 from unittest.mock import AsyncMock, patch, MagicMock
+import json
+from datetime import datetime, timedelta
 
 from app import database
 from app.services.tussam import TussamService
@@ -268,6 +272,73 @@ async def test_get_tiempos_result_malformado(service, db_ready):
     assert result["tiempos"] == []
 
 
+@pytest.mark.asyncio
+async def test_get_tiempos_stale_cache_on_upstream_error(service, db_ready):
+    """Si TUSSAM falla, devuelve cache antigua marcada como stale."""
+    import aiosqlite
+
+    tiempos = {
+        "parada": "43",
+        "nombre": "Recaredo",
+        "latitud": 37.389,
+        "longitud": -5.984,
+        "tiempos": [
+            {
+                "linea": "01",
+                "color": "#f00",
+                "tiempo_minutos": 4,
+                "destino": "NORTE",
+            }
+        ],
+    }
+    stale_time = datetime.now() - timedelta(minutes=5)
+
+    async with aiosqlite.connect(database.DATABASE_URL) as conn:
+        await conn.execute(
+            "INSERT INTO tiempos_cache (parada_codigo, tiempos_json, cached_at) VALUES (?, ?, ?)",
+            ("43", json.dumps(tiempos), stale_time.isoformat(timespec="seconds")),
+        )
+        await conn.commit()
+
+    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.side_effect = httpx.ReadTimeout("timeout")
+        result = await service.get_tiempos_parada("43")
+
+    assert result["stale"] is True
+    assert result["tiempos"][0]["linea"] == "01"
+    assert "cached_at" in result
+
+
+@pytest.mark.asyncio
+async def test_get_tiempos_singleflight_por_parada(service, db_ready):
+    """Dos peticiones simultáneas a la misma parada hacen una sola llamada real."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {}
+    mock_response.json.return_value = {
+        "result": {
+            "descripcion": {"texto": "Recaredo"},
+            "posicion": {"latitudE6": 37389663, "longitudE6": -5984265},
+            "lineasCoincidentes": [],
+        }
+    }
+    mock_response.raise_for_status = MagicMock()
+
+    async def delayed_response(_url):
+        await asyncio.sleep(0.01)
+        return mock_response
+
+    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.side_effect = delayed_response
+        results = await asyncio.gather(
+            service.get_tiempos_parada("43"),
+            service.get_tiempos_parada("43"),
+        )
+
+    assert mock_get.call_count == 1
+    assert [result["parada"] for result in results] == ["43", "43"]
+
+
 # ── _get_with_retry ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -289,9 +360,11 @@ async def test_get_with_retry_429(service):
     """429 debe reintentar con backoff."""
     mock_429 = MagicMock()
     mock_429.status_code = 429
+    mock_429.headers = {}
 
     mock_ok = MagicMock()
     mock_ok.status_code = 200
+    mock_ok.headers = {}
     mock_ok.raise_for_status = MagicMock()
 
     with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
@@ -300,6 +373,27 @@ async def test_get_with_retry_429(service):
             result = await service._get_with_retry("http://test.com")
     assert result.status_code == 200
     assert mock_get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_with_retry_respects_retry_after(service):
+    """Retry-After de TUSSAM debe mandar sobre el backoff local."""
+    mock_429 = MagicMock()
+    mock_429.status_code = 429
+    mock_429.headers = {"Retry-After": "7"}
+
+    mock_ok = MagicMock()
+    mock_ok.status_code = 200
+    mock_ok.headers = {}
+    mock_ok.raise_for_status = MagicMock()
+
+    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.side_effect = [mock_429, mock_ok]
+        with patch("app.services.tussam.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await service._get_with_retry("http://test.com")
+
+    assert result.status_code == 200
+    sleep.assert_awaited_once_with(7)
 
 
 # ── Líneas ───────────────────────────────────────────────────────────
