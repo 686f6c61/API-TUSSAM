@@ -11,11 +11,10 @@ Gestión de SQLite para almacenar:
 Usa una conexión persistente en modo WAL para mejor rendimiento en lecturas concurrentes.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.0
+Versión: 1.0.1
 Licencia: MIT
 """
 
-import sqlite3
 import aiosqlite
 import logging
 from typing import List, Optional
@@ -31,6 +30,16 @@ CACHE_TTL_MINUTES = 1
 
 # Conexión persistente (se inicializa en startup, se cierra en shutdown)
 _db: Optional[aiosqlite.Connection] = None
+
+PARADA_COLUMNS = (
+    "codigo, nombre, latitud, longitud, calle, numero, codigo_postal, "
+    "municipio, provincia, comunidad_autonoma, direccion_completa, updated_at"
+)
+
+
+def _now_iso() -> str:
+    """SQLite no necesita adaptadores de datetime si guardamos ISO explícito."""
+    return datetime.now().isoformat(timespec="seconds")
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -165,9 +174,19 @@ async def get_all_paradas_from_db() -> List[dict]:
     """Obtiene todas las paradas de la base de datos."""
     db = await get_db()
     db.row_factory = aiosqlite.Row
-    async with db.execute("SELECT * FROM paradas ORDER BY codigo") as cursor:
+    async with db.execute(
+        f"SELECT {PARADA_COLUMNS} FROM paradas ORDER BY codigo"
+    ) as cursor:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+async def count_paradas() -> int:
+    """Cuenta paradas sin cargar la tabla completa."""
+    db = await get_db()
+    async with db.execute("SELECT COUNT(*) FROM paradas") as cursor:
+        row = await cursor.fetchone()
+        return int(row[0])
 
 
 async def save_parada(
@@ -185,7 +204,7 @@ async def save_parada(
         INSERT OR REPLACE INTO paradas (codigo, nombre, latitud, longitud, calle, numero, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """,
-        (codigo, nombre, latitud, longitud, calle, numero, datetime.now()),
+        (codigo, nombre, latitud, longitud, calle, numero, _now_iso()),
     )
     await db.commit()
 
@@ -210,9 +229,9 @@ async def save_paradas_batch(paradas: List[dict]):
                     calle = excluded.calle,
                     numero = excluded.numero,
                     updated_at = excluded.updated_at
-            """,
+                """,
                 (p["codigo"], p["nombre"], p["latitud"], p["longitud"],
-                 calle, p.get("numero"), datetime.now()),
+                 calle, p.get("numero"), _now_iso()),
             )
         else:
             await db.execute(
@@ -225,7 +244,7 @@ async def save_paradas_batch(paradas: List[dict]):
                     longitud = excluded.longitud,
                     updated_at = excluded.updated_at
             """,
-                (p["codigo"], p["nombre"], p["latitud"], p["longitud"], datetime.now()),
+                (p["codigo"], p["nombre"], p["latitud"], p["longitud"], _now_iso()),
             )
     await db.commit()
 
@@ -234,7 +253,9 @@ async def get_parada_by_codigo(codigo: str) -> Optional[dict]:
     """Obtiene una parada específica por su código."""
     db = await get_db()
     db.row_factory = aiosqlite.Row
-    async with db.execute("SELECT * FROM paradas WHERE codigo = ?", (codigo,)) as cursor:
+    async with db.execute(
+        f"SELECT {PARADA_COLUMNS} FROM paradas WHERE codigo = ?", (codigo,)
+    ) as cursor:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
@@ -260,7 +281,7 @@ async def get_lineas_from_db() -> List[dict]:
 async def save_lineas_batch(lineas: List[dict]):
     """Guarda múltiples líneas con horarios y sublinea."""
     db = await get_db()
-    for l in lineas:
+    for linea in lineas:
         await db.execute(
             """
             INSERT OR REPLACE INTO lineas
@@ -270,11 +291,11 @@ async def save_lineas_batch(lineas: List[dict]):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
-                l["numero"], l["nombre"], l["color"],
-                l.get("sublinea"),
-                l.get("hora_inicio_ida"), l.get("hora_fin_ida"),
-                l.get("hora_inicio_vuelta"), l.get("hora_fin_vuelta"),
-                datetime.now(),
+                linea["numero"], linea["nombre"], linea["color"],
+                linea.get("sublinea"),
+                linea.get("hora_inicio_ida"), linea.get("hora_fin_ida"),
+                linea.get("hora_inicio_vuelta"), linea.get("hora_fin_vuelta"),
+                _now_iso(),
             ),
         )
     await db.commit()
@@ -371,7 +392,7 @@ async def save_tiempos_cache(parada_codigo: str, tiempos: dict):
         INSERT OR REPLACE INTO tiempos_cache (parada_codigo, tiempos_json, cached_at)
         VALUES (?, ?, ?)
     """,
-        (parada_codigo, json.dumps(tiempos), datetime.now()),
+        (parada_codigo, json.dumps(tiempos), _now_iso()),
     )
     await db.commit()
 
@@ -476,7 +497,12 @@ async def get_paradas_de_linea(linea_numero: str) -> List[dict]:
     db.row_factory = aiosqlite.Row
     async with db.execute(
         """
-        SELECT pl.sentido, pl.orden, p.*
+        SELECT
+            pl.sentido, pl.orden,
+            p.codigo, p.nombre, p.latitud, p.longitud,
+            p.calle, p.numero, p.codigo_postal, p.municipio,
+            p.provincia, p.comunidad_autonoma,
+            p.direccion_completa, p.updated_at
         FROM paradas_lineas pl
         JOIN paradas p ON p.codigo = pl.parada_codigo
         WHERE pl.linea_numero = ?

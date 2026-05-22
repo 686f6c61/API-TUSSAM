@@ -18,7 +18,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.services.tussam import tussam_service
-from app import database
 
 logger = logging.getLogger("tussam.scheduler")
 

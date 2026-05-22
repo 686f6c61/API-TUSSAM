@@ -341,7 +341,7 @@ class TestFase3_CercanasReal:
             assert "openstreetmap.org" in p["mapa_url"]
             assert str(p["latitud"]) in p["mapa_url"]
 
-        print(f"\n  → /cercanas con mapa: URL generada OK")
+        print("\n  → /cercanas con mapa: URL generada OK")
         time.sleep(DELAY)
 
     def test_cercanas_tiempo_max(self, client):

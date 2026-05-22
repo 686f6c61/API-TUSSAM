@@ -10,7 +10,7 @@ Gestiona:
 - Sincronización de datos
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.0
+Versión: 1.0.1
 Licencia: MIT
 """
 
@@ -405,7 +405,7 @@ class TussamService:
         response = await self._get_with_retry(url)
 
         data = response.json()
-        result = data.get("result", {})
+        result = self._normalize_tiempos_result(data.get("result"), codigo_parada)
 
         parada_info = result.get("descripcion", {}).get("texto", "")
         posicion = result.get("posicion", {})
@@ -451,6 +451,33 @@ class TussamService:
         # Guardamos en cache
         await db.save_tiempos_cache(codigo_parada, result_data)
         return result_data
+
+    def _normalize_tiempos_result(self, result, codigo_parada: str) -> dict:
+        """
+        TUSSAM no documenta el contrato y a veces devuelve `result` como lista.
+
+        Para la API pública, una respuesta vacía o malformada debe traducirse en
+        "sin tiempos disponibles" en lugar de propagar un 500 al cliente.
+        """
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, list):
+            if not result:
+                logger.info("TUSSAM sin tiempos para parada %s", codigo_parada)
+                return {}
+            first = result[0]
+            if isinstance(first, dict):
+                logger.warning(
+                    "TUSSAM devolvió lista para parada %s; usando primer elemento",
+                    codigo_parada,
+                )
+                return first
+        logger.warning(
+            "Payload inesperado de TUSSAM para parada %s: %s",
+            codigo_parada,
+            type(result).__name__,
+        )
+        return {}
 
     async def _geocode_nominatim_single(
         self, codigo: str, nombre: str, lat: float, lon: float

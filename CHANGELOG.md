@@ -6,6 +6,28 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) y el v
 
 ---
 
+## [1.0.1] - 2026-05-22
+
+### Seguridad
+
+- Los endpoints `POST /sync/*` ahora requieren `SYNC_API_KEY` por defecto y fallan cerrado si no está configurada.
+- Eliminado el valor por defecto de `SYNC_API_KEY` en Docker Compose.
+- Añadida configuración por entorno para docs, CORS y hosts permitidos.
+- El contenedor Docker se ejecuta con usuario no-root.
+
+### Corregido
+
+- El parser de tiempos tolera respuestas vacías o con forma inesperada de la API de TUSSAM sin devolver 500.
+- `/health` cuenta paradas con una query agregada en vez de cargar toda la tabla.
+- Las respuestas públicas usan modelos explícitos para mantener estable el contrato de la API.
+- Las fechas de SQLite se guardan como strings ISO explícitos para evitar warnings de adaptadores `datetime`.
+
+### DevOps
+
+- Añadido `.dockerignore` para reducir el contexto de build.
+- El workflow de GitHub ejecuta compile, lint, tests unitarios y auditoría de dependencias antes de construir y publicar la imagen Docker.
+- Actualizada documentación pública de despliegue y variables de entorno.
+
 ## [1.0.0] - 2026-05-22
 
 ### Añadido

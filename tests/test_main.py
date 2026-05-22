@@ -66,8 +66,8 @@ async def test_get_all_paradas(db_with_paradas):
     client = _make_client()
     with patch("app.main.tussam_service.get_all_paradas", new_callable=AsyncMock) as mock:
         mock.return_value = [
-            {"codigo": "43", "nombre": "Recaredo"},
-            {"codigo": "44", "nombre": "San Esteban"},
+            {"codigo": "43", "nombre": "Recaredo", "latitud": 37.389, "longitud": -5.984},
+            {"codigo": "44", "nombre": "San Esteban", "latitud": 37.388, "longitud": -5.985},
         ]
         r = client.get("/paradas")
     assert r.status_code == 200
@@ -81,7 +81,12 @@ async def test_get_parada_existente(db_with_paradas):
     """Obtener parada por código."""
     client = _make_client()
     with patch("app.main.tussam_service.get_parada_by_codigo", new_callable=AsyncMock) as mock:
-        mock.return_value = {"codigo": "43", "nombre": "Recaredo"}
+        mock.return_value = {
+            "codigo": "43",
+            "nombre": "Recaredo",
+            "latitud": 37.389,
+            "longitud": -5.984,
+        }
         r = client.get("/paradas/43")
     assert r.status_code == 200
     assert r.json()["codigo"] == "43"
@@ -105,7 +110,18 @@ async def test_get_tiempos(db_ready):
     client = _make_client()
     mock_tiempos = {
         "parada": "43",
-        "tiempos": [{"linea": "01", "tiempo_minutos": 4, "sentido": 2}],
+        "nombre": "Recaredo",
+        "latitud": 37.389,
+        "longitud": -5.984,
+        "tiempos": [
+            {
+                "linea": "01",
+                "color": "#f00",
+                "tiempo_minutos": 4,
+                "destino": "NORTE",
+                "sentido": 2,
+            }
+        ],
     }
     with patch("app.main.tussam_service.get_tiempos_parada", new_callable=AsyncMock) as mock:
         mock.return_value = mock_tiempos
@@ -167,7 +183,16 @@ async def test_get_paradas_de_linea(db_ready):
     """Paradas de una línea."""
     client = _make_client()
     with patch("app.main.tussam_service.get_paradas_de_linea", new_callable=AsyncMock) as mock:
-        mock.return_value = [{"codigo": "43", "sentido": 1, "orden": 0}]
+        mock.return_value = [
+            {
+                "codigo": "43",
+                "nombre": "Recaredo",
+                "latitud": 37.389,
+                "longitud": -5.984,
+                "sentido": 1,
+                "orden": 0,
+            }
+        ]
         r = client.get("/lineas/01/paradas")
     assert r.status_code == 200
     assert r.json()[0]["codigo"] == "43"
@@ -436,10 +461,12 @@ async def test_max_paradas_maximo(db_ready):
 
 # ── POST /sync/* (autenticación) ─────────────────────────────────────
 
+VALID_SYNC_KEY = "secret-key-12345678901234567890"
+
 @pytest.mark.asyncio
 async def test_sync_sin_key_con_env(db_ready, monkeypatch):
     """Sync sin API key cuando SYNC_API_KEY está configurada debe dar 403."""
-    monkeypatch.setenv("SYNC_API_KEY", "secret-key-123")
+    monkeypatch.setenv("SYNC_API_KEY", VALID_SYNC_KEY)
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock):
         r = client.post("/sync/paradas")
@@ -449,18 +476,18 @@ async def test_sync_sin_key_con_env(db_ready, monkeypatch):
 @pytest.mark.asyncio
 async def test_sync_con_key_correcta(db_ready, monkeypatch):
     """Sync con API key correcta debe funcionar."""
-    monkeypatch.setenv("SYNC_API_KEY", "secret-key-123")
+    monkeypatch.setenv("SYNC_API_KEY", VALID_SYNC_KEY)
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mock:
         mock.return_value = 100
-        r = client.post("/sync/paradas", headers={"X-API-Key": "secret-key-123"})
+        r = client.post("/sync/paradas", headers={"X-API-Key": VALID_SYNC_KEY})
     assert r.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_sync_con_key_incorrecta(db_ready, monkeypatch):
     """Sync con API key incorrecta debe dar 403."""
-    monkeypatch.setenv("SYNC_API_KEY", "secret-key-123")
+    monkeypatch.setenv("SYNC_API_KEY", VALID_SYNC_KEY)
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock):
         r = client.post("/sync/paradas", headers={"X-API-Key": "wrong-key"})
@@ -469,8 +496,21 @@ async def test_sync_con_key_incorrecta(db_ready, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_sin_env_key(db_ready, monkeypatch):
-    """Sin SYNC_API_KEY configurada, sync debe funcionar sin key (dev mode)."""
+    """Sin SYNC_API_KEY configurada, sync debe fallar cerrado."""
     monkeypatch.delenv("SYNC_API_KEY", raising=False)
+    monkeypatch.delenv("ALLOW_UNAUTHENTICATED_SYNC", raising=False)
+    client = _make_client()
+    with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mock:
+        mock.return_value = 100
+        r = client.post("/sync/paradas")
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_sync_sin_env_key_con_flag_dev(db_ready, monkeypatch):
+    """El modo sin key requiere un flag explícito de desarrollo."""
+    monkeypatch.delenv("SYNC_API_KEY", raising=False)
+    monkeypatch.setenv("ALLOW_UNAUTHENTICATED_SYNC", "true")
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mock:
         mock.return_value = 100
@@ -479,9 +519,20 @@ async def test_sync_sin_env_key(db_ready, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sync_rechaza_key_por_defecto(db_ready, monkeypatch):
+    """La clave de ejemplo no debe habilitar endpoints privilegiados."""
+    monkeypatch.setenv("SYNC_API_KEY", "cambia-esta-clave")
+    client = _make_client()
+    with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock):
+        r = client.post("/sync/paradas", headers={"X-API-Key": "cambia-esta-clave"})
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_sync_all(db_ready, monkeypatch):
     """POST /sync/all debe sincronizar todo."""
     monkeypatch.delenv("SYNC_API_KEY", raising=False)
+    monkeypatch.setenv("ALLOW_UNAUTHENTICATED_SYNC", "true")
     client = _make_client()
     with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mp, \
          patch("app.main.tussam_service.sync_lineas_from_api", new_callable=AsyncMock) as ml, \
@@ -512,6 +563,8 @@ def test_rate_limit_device_header():
     r = client.get("/", headers={"X-Device-ID": "test-device"})
     assert r.status_code == 429
     assert "Retry-After" in r.headers
+    assert r.headers["X-RateLimit-Limit"] == "60"
+    assert r.headers["X-RateLimit-Remaining"] == "0"
 
 
 def test_rate_limit_different_devices():
@@ -523,3 +576,13 @@ def test_rate_limit_different_devices():
     # device-B debe funcionar sin problemas
     r = client.get("/", headers={"X-Device-ID": "device-B"})
     assert r.status_code == 200
+    assert r.headers["X-RateLimit-Limit"] == "60"
+    assert "X-RateLimit-Remaining" in r.headers
+
+
+def test_rate_limit_invalid_device_id_falls_back_to_ip_limit():
+    """IDs con caracteres inesperados no deben crear buckets de dispositivo."""
+    client = _make_client()
+    r = client.get("/", headers={"X-Device-ID": "bad id with spaces"})
+    assert r.status_code == 200
+    assert r.headers["X-RateLimit-Limit"] == "300"

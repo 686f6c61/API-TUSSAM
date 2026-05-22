@@ -22,7 +22,6 @@ Licencia: MIT
 """
 
 import sqlite3
-import json
 import time
 import sys
 import os
@@ -160,7 +159,7 @@ def main():
                 update_parada(args.db, codigo, direccion)
             ok += 1
         else:
-            print(f"  ✗ Sin resultado")
+            print("  ✗ Sin resultado")
             errores += 1
 
         # Rate limiting: 1 petición por segundo

@@ -5,7 +5,6 @@ Mockea las peticiones HTTP para no depender de la API externa.
 """
 
 import pytest
-import math
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from app import database
@@ -206,6 +205,69 @@ async def test_get_tiempos_sentido_ambiguo(service, db_ready):
     assert result["tiempos"][0]["sentido"] is None
 
 
+@pytest.mark.asyncio
+async def test_get_tiempos_result_lista_vacia(service, db_ready):
+    """Si TUSSAM devuelve result=[], responder sin tiempos y sin 500."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"result": []}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_response
+        result = await service.get_tiempos_parada("253", force_refresh=True)
+
+    assert result == {
+        "parada": "253",
+        "nombre": "",
+        "latitud": None,
+        "longitud": None,
+        "tiempos": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_tiempos_result_lista_con_dict(service, db_ready):
+    """Si TUSSAM devuelve una lista con objeto, se parsea el primer elemento."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "result": [
+            {
+                "descripcion": {"texto": "Parada Lista"},
+                "posicion": {"latitudE6": 37389663, "longitudE6": -5984265},
+                "lineasCoincidentes": [],
+            }
+        ]
+    }
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_response
+        result = await service.get_tiempos_parada("253", force_refresh=True)
+
+    assert result["nombre"] == "Parada Lista"
+    assert result["latitud"] == 37.389663
+    assert result["longitud"] == -5.984265
+    assert result["tiempos"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_tiempos_result_malformado(service, db_ready):
+    """Payload inesperado de TUSSAM debe degradar a respuesta vacía."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"result": "sin datos"}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.object(service.client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_response
+        result = await service.get_tiempos_parada("253", force_refresh=True)
+
+    assert result["parada"] == "253"
+    assert result["tiempos"] == []
+
+
 # ── _get_with_retry ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -247,7 +309,7 @@ async def test_get_lineas(service, db_with_lineas):
     """Obtener todas las líneas de la DB."""
     result = await service.get_lineas()
     assert len(result) == 2
-    numeros = {l["numero"] for l in result}
+    numeros = {linea["numero"] for linea in result}
     assert numeros == {"01", "C4"}
 
 

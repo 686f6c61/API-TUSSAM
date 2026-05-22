@@ -28,6 +28,7 @@ def test_start_scheduler_enabled(monkeypatch):
     call_kwargs = mock_add.call_args
     trigger = call_kwargs[0][1]  # Segundo argumento posicional = CronTrigger
     assert call_kwargs[1]["id"] == "weekly_sync"
+    assert trigger is not None
 
 
 def test_start_scheduler_disabled(monkeypatch):

@@ -101,7 +101,7 @@ async def test_save_and_get_lineas(db_with_lineas):
     """Guardar y recuperar líneas."""
     lineas = await database.get_lineas_from_db()
     assert len(lineas) == 2
-    numeros = {l["numero"] for l in lineas}
+    numeros = {linea["numero"] for linea in lineas}
     assert numeros == {"01", "C4"}
 
 
@@ -213,7 +213,7 @@ async def test_tiempos_cache_expired(db_ready):
     async with aiosqlite.connect(database.DATABASE_URL) as conn:
         await conn.execute(
             "INSERT INTO tiempos_cache (parada_codigo, tiempos_json, cached_at) VALUES (?, ?, ?)",
-            ("43", json.dumps(tiempos), expired_time),
+            ("43", json.dumps(tiempos), expired_time.isoformat(timespec="seconds")),
         )
         await conn.commit()
 

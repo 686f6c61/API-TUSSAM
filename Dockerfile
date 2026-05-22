@@ -1,13 +1,23 @@
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-COPY pyproject.toml .
+RUN addgroup --system tussam \
+    && adduser --system --ingroup tussam --home /app tussam
+
+COPY pyproject.toml README.md LICENSE ./
+COPY app ./app
 RUN pip install --no-cache-dir .
 
-COPY . .
+COPY data ./data
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data \
+    && chown -R tussam:tussam /app
+
+USER tussam
 
 EXPOSE 8080
 

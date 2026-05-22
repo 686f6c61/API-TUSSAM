@@ -87,7 +87,7 @@ curl http://localhost:8081/health
 
 El contenedor expone el puerto **8081** (configurable en `docker-compose.yml`).
 
-La base de datos SQLite incluida (`data/tussam.db`) ya contiene 967 paradas, 43 lineas y 1,756 relaciones. No es necesario ejecutar sync la primera vez.
+La base de datos SQLite incluida (`data/tussam.db`) ya contiene 967 paradas, 49 lineas y 1,756 relaciones. No es necesario ejecutar sync la primera vez.
 
 **docker-compose.yml** de referencia:
 
@@ -107,7 +107,9 @@ services:
       - SYNC_DAY=sun               # sincronizar los domingos
       - SYNC_HOUR=4                # a las 04:00 UTC
       - SYNC_MINUTE=0
-      - SYNC_API_KEY=${SYNC_API_KEY:-cambia-esta-clave}
+      - SYNC_API_KEY=${SYNC_API_KEY:?Define SYNC_API_KEY antes de arrancar}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - ENABLE_DOCS=${ENABLE_DOCS:-true}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -122,10 +124,17 @@ services:
 # Instalar dependencias
 pip install -e .
 
+# Configurar API key para endpoints de administracion
+export SYNC_API_KEY=$(openssl rand -hex 32)
+
 # Arrancar servidor de desarrollo
 uvicorn app.main:app --reload --port 8080
 
 # Arrancar en produccion
+export APP_ENV=production
+export ENABLE_DOCS=false
+export CORS_ORIGINS=https://tu-dominio.example
+export ALLOWED_HOSTS=tu-dominio.example
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
@@ -160,7 +169,7 @@ curl -X POST http://localhost:8080/sync/all \
   -H "X-API-Key: tu-clave-secreta"
 ```
 
-La API key se configura con la variable de entorno `SYNC_API_KEY`. Si no se configura, los endpoints de sync quedan abiertos (modo desarrollo). La comparacion de claves usa `hmac.compare_digest` para prevenir timing attacks.
+La API key se configura con la variable de entorno `SYNC_API_KEY`. Si no se configura, los endpoints de sync rechazan la petición. Para pruebas locales sin clave se puede activar explícitamente `ALLOW_UNAUTHENTICATED_SYNC=true`. La comparación de claves usa `hmac.compare_digest` para prevenir timing attacks.
 
 ---
 
@@ -198,7 +207,9 @@ Todas las respuestas incluyen cabeceras con el estado actual del rate limit:
 |----------|-------------|
 | `X-RateLimit-Limit` | Límite máximo: 60 (dispositivo) o 300 (IP) |
 | `X-RateLimit-Remaining` | Peticiones restantes en la ventana actual |
-| `X-RateLimit-Reset` | Timestamp Unix cuando se reinicia la ventana |
+| `X-RateLimit-Reset` | Segundos restantes hasta reiniciar la ventana |
+
+El limitador incluido es local al proceso. En despliegues con varios workers o réplicas, aplica también límites en el proxy, CDN o balanceador.
 
 ---
 
@@ -569,7 +580,7 @@ curl http://localhost:8080/lineas
 ]
 ```
 
-Ordenadas por `numero`. Actualmente devuelve 43 lineas.
+Ordenadas por `numero`. Actualmente devuelve 49 lineas.
 
 ---
 
@@ -629,7 +640,7 @@ curl http://localhost:8080/health
   "status": "ok",
   "db": "connected",
   "paradas_en_db": 967,
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
 ```
 
@@ -650,14 +661,14 @@ curl http://localhost:8080/
 ```
 
 ```json
-{"message": "TUSSAM API", "version": "1.0.0", "docs": "/docs"}
+{"message": "TUSSAM API", "version": "1.0.1", "docs": "/docs"}
 ```
 
 ---
 
 ### Endpoints de Sincronizacion
 
-Todos los endpoints `POST /sync/*` requieren el header `X-API-Key` (si `SYNC_API_KEY` esta configurada).
+Todos los endpoints `POST /sync/*` requieren el header `X-API-Key`.
 
 #### `POST /sync/all`
 
@@ -672,7 +683,7 @@ curl -X POST http://localhost:8080/sync/all \
 {
   "message": "Sincronizacion completa",
   "paradas": 967,
-  "lineas": 43,
+  "lineas": 49,
   "paradas_lineas": 1756
 }
 ```
@@ -698,7 +709,7 @@ curl -X POST http://localhost:8080/sync/lineas -H "X-API-Key: tu-clave"
 ```
 
 ```json
-{"message": "Se sincronizaron 43 lineas"}
+{"message": "Se sincronizaron 49 lineas"}
 ```
 
 #### `POST /sync/paradas-lineas`
@@ -734,7 +745,8 @@ El script usa Nominatim (OpenStreetMap) con rate limiting automático (1 petici�
 
 | Codigo | Cuando |
 |--------|--------|
-| 403 | `X-API-Key` ausente o incorrecta (si `SYNC_API_KEY` esta configurada) |
+| 403 | `X-API-Key` ausente o incorrecta |
+| 503 | `SYNC_API_KEY` no está configurada o usa un valor de ejemplo |
 
 ---
 
@@ -1096,7 +1108,7 @@ TUSSAM/
 │   └── services/
 │       └── tussam.py         # Cliente API TUSSAM + geocodificacion Nominatim
 ├── data/
-│   └── tussam.db             # SQLite con datos precargados (967 paradas, 43 lineas)
+│   └── tussam.db             # SQLite con datos precargados (967 paradas, 49 lineas)
 ├── tests/
 │   ├── conftest.py           # Fixtures compartidas
 │   ├── test_database.py      # 23 tests de base de datos
@@ -1133,7 +1145,12 @@ TUSSAM/
 
 | Variable | Default | Descripcion |
 |----------|---------|-------------|
-| `SYNC_API_KEY` | *(vacio)* | API key para endpoints `/sync/*`. Sin valor = sin proteccion |
+| `APP_ENV` | `development` | Entorno de ejecución (`production` aplica defaults más restrictivos) |
+| `SYNC_API_KEY` | *(requerida)* | API key para endpoints `/sync/*` |
+| `ALLOW_UNAUTHENTICATED_SYNC` | `false` | Permite sync sin API key solo para desarrollo local explícito |
+| `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
+| `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
+| `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
 | `SYNC_ENABLED` | `true` | Activar scheduler de sync semanal |
 | `SYNC_DAY` | `sun` | Dia de sincronizacion |
 | `SYNC_HOUR` | `4` | Hora UTC |

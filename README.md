@@ -52,7 +52,7 @@ flowchart TB
     end
 
     subgraph Almacenamiento["Persistencia"]
-        SQLite["SQLite (WAL)\n967 paradas\n43 líneas\n1.756 relaciones"]
+        SQLite["SQLite (WAL)\n967 paradas\n49 líneas\n1.756 relaciones"]
     end
 
     Watch --> RL
@@ -154,7 +154,7 @@ erDiagram
 | Tabla | Registros | Descripción |
 |-------|-----------|-------------|
 | `paradas` | 967 | Paradas de autobús con dirección geocodificada |
-| `lineas` | 43 | Líneas de TUSSAM con nombre y color |
+| `lineas` | 49 | Líneas de TUSSAM con nombre y color |
 | `paradas_lineas` | 1.756 | Relación N:M (qué líneas paran en cada parada) |
 | `tiempos_cache` | efímero | Cache de tiempos de llegada (TTL: 1 min) |
 
@@ -178,7 +178,11 @@ El 17,8% sin número son paradas en glorietas, puentes, avenidas sin portales o 
 
 ```bash
 docker pull ghcr.io/686f6c61/api-tussam:main
-docker run -d -p 8081:8080 -v $(pwd)/data:/app/data ghcr.io/686f6c61/api-tussam:main
+export SYNC_API_KEY=$(openssl rand -hex 32)
+docker run -d -p 8081:8080 \
+  -e SYNC_API_KEY="$SYNC_API_KEY" \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/686f6c61/api-tussam:main
 ```
 
 ### Con Docker Compose (recomendado para desarrollo)
@@ -186,6 +190,7 @@ docker run -d -p 8081:8080 -v $(pwd)/data:/app/data ghcr.io/686f6c61/api-tussam:
 ```bash
 git clone https://github.com/686f6c61/API-TUSSAM.git
 cd API-TUSSAM
+export SYNC_API_KEY=$(openssl rand -hex 32)
 docker compose up -d
 ```
 
@@ -197,6 +202,7 @@ La API estará en `http://localhost:8081`. La base de datos con 967 paradas vien
 git clone https://github.com/686f6c61/API-TUSSAM.git
 cd API-TUSSAM
 pip install -e .
+export SYNC_API_KEY=$(openssl rand -hex 32)
 uvicorn app.main:app --port 8080
 ```
 
@@ -257,7 +263,7 @@ curl "http://localhost:8081/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2"
 | POST | `/sync/lineas` | API Key | Sincronizar líneas |
 | POST | `/sync/all` | API Key | Sincronización completa |
 
-Para documentación interactiva: `http://localhost:8081/docs` (Swagger UI) o `/redoc`.
+Para documentación interactiva en desarrollo: `http://localhost:8081/docs` (Swagger UI) o `/redoc`. En producción se puede desactivar con `ENABLE_DOCS=false`.
 
 ---
 
@@ -294,11 +300,11 @@ Esto devuelve solo las paradas cuya orientación desde el usuario difiere en 45�
 
 ### Sincronización inicial
 
-La base de datos incluida ya tiene 967 paradas, 43 líneas y sus relaciones. Si necesitas refrescar los datos:
+La base de datos incluida ya tiene 967 paradas, 49 líneas y sus relaciones. Si necesitas refrescar los datos:
 
 ```bash
 # Sincronizar paradas y líneas desde la API de TUSSAM
-curl -X POST http://localhost:8081/sync/all -H "X-API-Key: cambia-esta-clave"
+curl -X POST http://localhost:8081/sync/all -H "X-API-Key: $SYNC_API_KEY"
 ```
 
 ### Geocodificación de direcciones
@@ -336,7 +342,7 @@ La API implementa dos niveles de rate limiting para protegerse y proteger a TUSS
 | Dispositivo | 60 req/min | `X-Device-ID` | Limitar por AppleWatch/iPhone |
 | IP (fallback) | 300 req/min | Dirección IP | Protección anti-DDoS |
 
-Las cabeceras `X-RateLimit-Remaining`, `X-RateLimit-Limit` y `X-RateLimit-Reset` se incluyen en cada respuesta. Cuando se alcanza el límite, la API responde `429 Too Many Requests` con `Retry-After`.
+Las cabeceras `X-RateLimit-Remaining`, `X-RateLimit-Limit` y `X-RateLimit-Reset` se incluyen en cada respuesta. Cuando se alcanza el límite, la API responde `429 Too Many Requests` con `Retry-After`. Este limitador es local al proceso; para despliegues con varios workers o réplicas conviene aplicar límites también en el proxy, CDN o balanceador.
 
 ---
 
@@ -344,8 +350,10 @@ Las cabeceras `X-RateLimit-Remaining`, `X-RateLimit-Limit` y `X-RateLimit-Reset`
 
 - **Endpoints públicos** (`GET`): sin autenticación, protegidos solo por rate limiting.
 - **Endpoints de sync** (`POST /sync/*`): requieren API Key mediante cabecera `X-API-Key`.
-- **CORS**: restringido a métodos `GET` y `POST`.
-- **API Key por defecto**: `cambia-esta-clave`. Cámbiala en producción con la variable `SYNC_API_KEY`.
+- **CORS**: restringido a métodos `GET` y `POST`; los orígenes se configuran con `CORS_ORIGINS`.
+- **Docs**: activas por defecto en desarrollo, configurables con `ENABLE_DOCS`.
+- **Hosts**: se pueden limitar con `ALLOWED_HOSTS` cuando hay dominios de despliegue conocidos.
+- **API Key**: `SYNC_API_KEY` no tiene valor por defecto. Define una clave aleatoria antes de arrancar.
 
 ```bash
 # Ejemplo con API Key
@@ -358,7 +366,12 @@ curl -X POST http://localhost:8081/sync/all -H "X-API-Key: mi-clave-segura"
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
-| `SYNC_API_KEY` | `cambia-esta-clave` | Clave para endpoints de sync |
+| `APP_ENV` | `development` | Entorno de ejecución (`production` aplica defaults más restrictivos) |
+| `SYNC_API_KEY` | *(requerida)* | Clave para endpoints de sync |
+| `ALLOW_UNAUTHENTICATED_SYNC` | `false` | Permite sync sin API key solo para desarrollo local explícito |
+| `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
+| `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
+| `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
 | `SYNC_ENABLED` | `true` | Activar scheduler semanal |
 | `SYNC_DAY` | `sun` | Día de la semana para sync |
 | `SYNC_HOUR` | `4` | Hora UTC para sync |

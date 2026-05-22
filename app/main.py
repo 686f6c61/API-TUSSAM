@@ -6,7 +6,7 @@ Puntos de entrada (endpoints) de la API.
 Expone los servicios de TUSSAM a través de HTTP.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.0
+Versión: 1.0.1
 Licencia: MIT
 """
 
@@ -15,20 +15,99 @@ import hmac
 import time
 import logging
 import httpx
+import re
 from collections import defaultdict
 
 from fastapi import FastAPI, Query, HTTPException, Request, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import List
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from contextlib import asynccontextmanager
 from app.services.tussam import tussam_service
 from app import database
 from app.scheduler import start_scheduler, stop_scheduler
 
 logger = logging.getLogger("tussam.api")
+
+APP_VERSION = "1.0.1"
+DEFAULT_SYNC_API_KEY = "cambia-esta-clave"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parsea booleanos de entorno de forma explícita y predecible."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_csv(name: str, default: str = "") -> list[str]:
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV in {"prod", "production"}
+
+
+class ParadaOut(BaseModel):
+    codigo: str
+    nombre: str
+    latitud: float
+    longitud: float
+    calle: str | None = None
+    numero: str | None = None
+    codigo_postal: str | None = None
+    municipio: str | None = None
+    provincia: str | None = None
+    comunidad_autonoma: str | None = None
+    direccion_completa: str | None = None
+    updated_at: str | None = None
+
+
+class ParadaCercanaOut(ParadaOut):
+    distancia: int
+    bearing: int | None = None
+    bearing_diff: int | None = None
+
+
+class ParadaLineaOut(ParadaOut):
+    sentido: int
+    orden: int
+
+
+class LineaOut(BaseModel):
+    numero: str
+    nombre: str
+    color: str
+    sublinea: int | None = None
+    hora_inicio_ida: str | None = None
+    hora_fin_ida: str | None = None
+    hora_inicio_vuelta: str | None = None
+    hora_fin_vuelta: str | None = None
+    updated_at: str | None = None
+
+
+class TiempoOut(BaseModel):
+    linea: str
+    color: str
+    tiempo_minutos: int
+    destino: str
+    distancia_metros: int | None = None
+    vehiculo: str | int | None = None
+    atributos: list = Field(default_factory=list)
+    sentido: int | None = None
+
+
+class TiemposParadaOut(BaseModel):
+    parada: str
+    nombre: str
+    latitud: float | None = None
+    longitud: float | None = None
+    tiempos: list[TiempoOut]
 
 # --- Autenticación para endpoints de sync ---
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -43,9 +122,22 @@ async def verify_sync_key(api_key: str = Security(api_key_header)):
     """
     expected = os.getenv("SYNC_API_KEY", "")
     if not expected:
-        # Sin API key configurada → modo desarrollo, endpoints abiertos
-        logger.warning("SYNC_API_KEY no configurada — endpoints de sync SIN PROTECCIÓN")
-        return
+        if _env_bool("ALLOW_UNAUTHENTICATED_SYNC", False):
+            logger.warning(
+                "ALLOW_UNAUTHENTICATED_SYNC activo: endpoints de sync sin API key"
+            )
+            return
+        logger.error("SYNC_API_KEY no configurada: rechazando endpoint de sync")
+        raise HTTPException(
+            status_code=503,
+            detail="SYNC_API_KEY no configurada",
+        )
+    if expected == DEFAULT_SYNC_API_KEY:
+        logger.error("SYNC_API_KEY usa el valor de ejemplo: rechazando endpoint de sync")
+        raise HTTPException(
+            status_code=503,
+            detail="SYNC_API_KEY insegura",
+        )
     if not api_key or not hmac.compare_digest(api_key, expected):
         raise HTTPException(status_code=403, detail="API key inválida o ausente")
 
@@ -56,6 +148,7 @@ DEVICE_RATE_LIMIT = 60       # 60 req/min por dispositivo (Watch refresha cada ~
 IP_RATE_LIMIT = 300          # 300 req/min por IP (generoso: muchos usuarios pueden compartir IP)
 MAX_DEVICE_ID_LEN = 64       # Longitud máxima de X-Device-ID (UUID = 36 chars)
 MAX_BUCKETS = 50_000         # Límite de buckets para prevenir DoS por memoria
+DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -79,10 +172,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _get_key_and_limit(self, request: Request) -> tuple[str, int]:
         """Determina la clave de rate limiting y su límite."""
         device_id = request.headers.get("X-Device-ID")
-        if device_id and len(device_id) <= MAX_DEVICE_ID_LEN:
+        if (
+            device_id
+            and len(device_id) <= MAX_DEVICE_ID_LEN
+            and DEVICE_ID_RE.fullmatch(device_id)
+        ):
             return f"device:{device_id}", self.device_limit
         client_ip = request.client.host if request.client else "unknown"
         return f"ip:{client_ip}", self.ip_limit
+
+    def _headers(self, limit: int, remaining: int, reset_seconds: int) -> dict[str, str]:
+        """Cabeceras estándar para que los clientes ajusten su frecuencia."""
+        return {
+            "X-RateLimit-Limit": str(limit),
+            "X-RateLimit-Remaining": str(max(0, remaining)),
+            "X-RateLimit-Reset": str(max(0, reset_seconds)),
+        }
 
     async def dispatch(self, request: Request, call_next):
         """
@@ -107,18 +212,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Filtrar timestamps: solo nos interesan los de los últimos `window` segundos
         self.buckets[key] = [t for t in self.buckets[key] if now - t < self.window]
+        reset_seconds = (
+            int(self.window - (now - self.buckets[key][0]))
+            if self.buckets[key]
+            else self.window
+        )
 
         # ¿Ha superado el límite?
         if len(self.buckets[key]) >= limit:
+            headers = self._headers(limit, 0, reset_seconds)
+            headers["Retry-After"] = str(max(1, reset_seconds))
             return JSONResponse(
                 status_code=429,
                 content={"detail": f"Demasiadas peticiones. Máximo {limit}/min."},
-                headers={"Retry-After": "60"},
+                headers=headers,
             )
 
         # Registrar esta petición y continuar con el siguiente middleware / endpoint
         self.buckets[key].append(now)
-        return await call_next(request)
+        response = await call_next(request)
+        reset_seconds = (
+            int(self.window - (now - self.buckets[key][0]))
+            if self.buckets[key]
+            else self.window
+        )
+        response.headers.update(
+            self._headers(limit, limit - len(self.buckets[key]), reset_seconds)
+        )
+        return response
 
 
 @asynccontextmanager
@@ -135,19 +256,26 @@ async def lifespan(app: FastAPI):
     await database.close_db()
 
 
+docs_enabled = _env_bool("ENABLE_DOCS", default=not IS_PRODUCTION)
+
 app = FastAPI(
     title="TUSSAM API",
     description="API para obtener horarios y paradas de TUSSAM (Sevilla)",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    version=APP_VERSION,
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
     lifespan=lifespan,
 )
 
 # Middlewares (orden inverso de ejecución: el último añadido se ejecuta primero)
+allowed_hosts = _env_csv("ALLOWED_HOSTS")
+if allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_env_csv("CORS_ORIGINS", default="" if IS_PRODUCTION else "*"),
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -157,7 +285,7 @@ app.add_middleware(RateLimitMiddleware)
 @app.get("/")
 async def root():
     """Página principal con información básica."""
-    return {"message": "TUSSAM API", "version": "1.0.0", "docs": "/docs"}
+    return {"message": "TUSSAM API", "version": APP_VERSION, "docs": app.docs_url}
 
 
 @app.get("/health")
@@ -166,16 +294,16 @@ async def health():
     db_ok = await database.db_health()
     if not db_ok:
         raise HTTPException(status_code=503, detail="DB no disponible")
-    paradas = await database.get_all_paradas_from_db()
+    paradas_count = await database.count_paradas()
     return {
         "status": "ok",
         "db": "connected",
-        "paradas_en_db": len(paradas),
-        "version": "1.0.0",
+        "paradas_en_db": paradas_count,
+        "version": APP_VERSION,
     }
 
 
-@app.get("/paradas")
+@app.get("/paradas", response_model=list[ParadaOut])
 async def get_all_paradas():
     """
     Obtiene todas las paradas de TUSSAM.
@@ -186,7 +314,7 @@ async def get_all_paradas():
     return await tussam_service.get_all_paradas()
 
 
-@app.get("/paradas/cercanas")
+@app.get("/paradas/cercanas", response_model=list[ParadaCercanaOut])
 async def get_paradas_cercanas(
     lat: float = Query(..., description="Latitud de la ubicación"),
     lon: float = Query(..., description="Longitud de la ubicación"),
@@ -341,7 +469,7 @@ async def get_paradas_cercanas_con_tiempos(
     return response_data
 
 
-@app.get("/paradas/{codigo}")
+@app.get("/paradas/{codigo}", response_model=ParadaOut)
 async def get_parada(codigo: str):
     """
     Obtiene una parada específica por su código.
@@ -361,7 +489,7 @@ async def get_parada(codigo: str):
     return parada
 
 
-@app.get("/paradas/{codigo}/tiempos")
+@app.get("/paradas/{codigo}/tiempos", response_model=TiemposParadaOut)
 async def get_tiempos(codigo: str):
     """Obtiene los tiempos de llegada de autobuses a una parada."""
     try:
@@ -377,7 +505,7 @@ async def get_tiempos(codigo: str):
         raise HTTPException(status_code=500, detail="Error interno")
 
 
-@app.get("/lineas")
+@app.get("/lineas", response_model=list[LineaOut])
 async def get_lineas():
     """
     Obtiene todas las líneas de TUSSAM.
@@ -388,7 +516,7 @@ async def get_lineas():
     return await tussam_service.get_lineas()
 
 
-@app.get("/lineas/{linea_numero}/paradas")
+@app.get("/lineas/{linea_numero}/paradas", response_model=list[ParadaLineaOut])
 async def get_paradas_de_linea(linea_numero: str):
     """
     Obtiene las paradas de una línea específica, ordenadas por sentido y recorrido.
@@ -399,7 +527,7 @@ async def get_paradas_de_linea(linea_numero: str):
     return await tussam_service.get_paradas_de_linea(linea_numero)
 
 
-@app.get("/paradas/{codigo}/lineas")
+@app.get("/paradas/{codigo}/lineas", response_model=list[str])
 async def get_lineas_de_parada(codigo: str):
     """
     Obtiene las líneas que pasan por una parada específica.

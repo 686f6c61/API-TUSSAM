@@ -13,7 +13,7 @@ Guía para levantar la API de TUSSAM con Docker. El repositorio incluye `Dockerf
 git clone https://github.com/686f6c61/API-TUSSAM.git
 cd API-TUSSAM
 
-# Configurar API key para endpoints de sync (opcional)
+# Configurar API key para endpoints de sync
 export SYNC_API_KEY=$(openssl rand -hex 32)
 
 # Arrancar
@@ -21,7 +21,7 @@ docker compose up -d
 
 # Verificar
 curl http://localhost:8081/health
-# {"status":"ok","db":"connected","paradas_en_db":967,"version":"1.0.0"}
+# {"status":"ok","db":"connected","paradas_en_db":967,"version":"1.0.1"}
 ```
 
 La API estará disponible en `http://localhost:8081`. La base de datos incluida (`data/tussam.db`) ya contiene 967 paradas, 49 líneas y 1.756 relaciones.
@@ -38,11 +38,15 @@ services:
     volumes:
       - ./data:/app/data
     environment:
+      - APP_ENV=${APP_ENV:-development}
+      - ENABLE_DOCS=${ENABLE_DOCS:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-}
       - SYNC_ENABLED=true
       - SYNC_DAY=sun
       - SYNC_HOUR=4
       - SYNC_MINUTE=0
-      - SYNC_API_KEY=${SYNC_API_KEY:-cambia-esta-clave}
+      - SYNC_API_KEY=${SYNC_API_KEY:?Define SYNC_API_KEY antes de arrancar docker compose}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
@@ -63,14 +67,24 @@ services:
 ```dockerfile
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-COPY pyproject.toml .
+RUN addgroup --system tussam \
+    && adduser --system --ingroup tussam --home /app tussam
+
+COPY pyproject.toml README.md LICENSE ./
+COPY app ./app
 RUN pip install --no-cache-dir .
 
-COPY . .
+COPY data ./data
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data \
+    && chown -R tussam:tussam /app
+
+USER tussam
 
 EXPOSE 8080
 
@@ -81,7 +95,12 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
-| `SYNC_API_KEY` | `cambia-esta-clave` | Clave para proteger `/sync/*`. Cámbiala en producción |
+| `APP_ENV` | `development` | Entorno de ejecución (`production` aplica defaults más restrictivos) |
+| `SYNC_API_KEY` | *(requerida)* | Clave para proteger `/sync/*` |
+| `ALLOW_UNAUTHENTICATED_SYNC` | `false` | Permite sync sin API key solo para desarrollo local explícito |
+| `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
+| `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
+| `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
 | `SYNC_ENABLED` | `true` | Activar sincronización semanal automática |
 | `SYNC_DAY` | `sun` | Día de la semana (`mon`-`sun`) |
 | `SYNC_HOUR` | `4` | Hora UTC (0-23) |
@@ -89,11 +108,11 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 ```bash
 # Opción 1: variable de entorno
-export SYNC_API_KEY=mi-clave-secreta
+export SYNC_API_KEY=$(openssl rand -hex 32)
 docker compose up -d
 
 # Opción 2: archivo .env (no subir al repo)
-echo "SYNC_API_KEY=mi-clave-secreta" > .env
+echo "SYNC_API_KEY=$(openssl rand -hex 32)" > .env
 docker compose up -d
 ```
 

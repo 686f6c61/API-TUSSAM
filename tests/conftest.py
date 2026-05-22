@@ -2,10 +2,7 @@
 Fixtures compartidos para los tests de TUSSAM API.
 """
 
-import os
-import pytest
 import pytest_asyncio
-import aiosqlite
 
 from app import database
 

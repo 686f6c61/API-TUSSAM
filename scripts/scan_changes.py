@@ -19,7 +19,7 @@ import httpx
 import sys
 import os
 from datetime import datetime
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -80,7 +80,6 @@ def get_remote_paradas() -> Dict[str, dict]:
     print("Paso 2: Obteniendo nodos de cada línea...")
     for i, linea in enumerate(lineas):
         linea_num = linea.get("linea", 0)
-        label = linea.get("labelLinea", "?")
         if not linea_num:
             continue
 
@@ -131,15 +130,21 @@ def compare(local: Dict, remote: Dict):
     # Detectar modificadas (mismo código, diferentes datos)
     modified = []
     for code in sorted(common_codes):
-        l = local[code]
-        r = remote[code]
+        local_parada = local[code]
+        remote_parada = remote[code]
         changes = []
-        if l["nombre"] != r["nombre"]:
-            changes.append(f"nombre: '{l['nombre']}' → '{r['nombre']}'")
-        if abs(l["latitud"] - r["latitud"]) > 0.0001:
-            changes.append(f"latitud: {l['latitud']} → {r['latitud']}")
-        if abs(l["longitud"] - r["longitud"]) > 0.0001:
-            changes.append(f"longitud: {l['longitud']} → {r['longitud']}")
+        if local_parada["nombre"] != remote_parada["nombre"]:
+            changes.append(
+                f"nombre: '{local_parada['nombre']}' → '{remote_parada['nombre']}'"
+            )
+        if abs(local_parada["latitud"] - remote_parada["latitud"]) > 0.0001:
+            changes.append(
+                f"latitud: {local_parada['latitud']} → {remote_parada['latitud']}"
+            )
+        if abs(local_parada["longitud"] - remote_parada["longitud"]) > 0.0001:
+            changes.append(
+                f"longitud: {local_parada['longitud']} → {remote_parada['longitud']}"
+            )
         if changes:
             modified.append((code, changes))
 
@@ -148,7 +153,7 @@ def compare(local: Dict, remote: Dict):
     print("INFORME DE CAMBIOS")
     print("=" * 60)
 
-    print(f"\n📊 Resumen:")
+    print("\n📊 Resumen:")
     print(f"   Paradas en DB local:  {len(local)}")
     print(f"   Paradas en API remota: {len(remote)}")
     print(f"   Diferencia:           {len(remote) - len(local):+d}")
@@ -163,15 +168,17 @@ def compare(local: Dict, remote: Dict):
     if removed_codes:
         print(f"\n🗑️ ELIMINADAS ({len(removed_codes)}):")
         for code in sorted(removed_codes):
-            l = local[code]
-            print(f"   {code}: {l['nombre']} ({l['calle']} {l['numero']})")
+            local_parada = local[code]
+            print(
+                f"   {code}: {local_parada['nombre']} "
+                f"({local_parada['calle']} {local_parada['numero']})"
+            )
 
     if modified:
         print(f"\n✏️ MODIFICADAS ({len(modified)}):")
         for code, changes in modified:
-            l = local[code]
-            r = remote[code]
-            print(f"   {code}: {l['nombre']}")
+            local_parada = local[code]
+            print(f"   {code}: {local_parada['nombre']}")
             for c in changes:
                 print(f"        ↳ {c}")
 
