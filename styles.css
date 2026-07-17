@@ -1702,10 +1702,19 @@ a:focus-visible,
   font-family: var(--font-mono);
   font-size: 17px;
   font-weight: 500;
+  transition: background 0.35s ease;
 }
 
+/* Al hacer scroll, cada paso que ya has alcanzado se ilumina en naranja
+   (lo activa un IntersectionObserver en app.js). El hover mantiene el efecto. */
+.flow-rail li.is-active .flow-num,
 .flow-rail li:hover .flow-num {
   background: var(--accent);
+}
+
+.flow-rail li.is-active::before {
+  background: var(--accent);
+  transition: background 0.35s ease;
 }
 
 .flow-body strong {

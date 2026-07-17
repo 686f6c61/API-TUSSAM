@@ -245,3 +245,29 @@ if (copyCodeButton) {
 
 renderCode("curl");
 Object.keys(ARRIVALS).forEach(renderArrivals);
+
+// Pasos de "Cómo funciona": según bajas, cada paso alcanzado se ilumina en
+// naranja. Un IntersectionObserver marca el paso como activo cuando su fila
+// cruza la mitad superior del viewport; una vez activo, se queda encendido
+// (efecto de progreso). Si el navegador no soporta IntersectionObserver, los
+// pasos simplemente no se iluminan al hacer scroll (el contenido sigue visible).
+(function activarPasosAlHacerScroll() {
+  const pasos = document.querySelectorAll(".flow-rail li");
+  if (!pasos.length || typeof IntersectionObserver === "undefined") return;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("is-active");
+          observer.unobserve(entry.target); // una vez encendido, no se apaga
+        }
+      }
+    },
+    // El paso se activa cuando su parte superior llega al 55% inferior del
+    // viewport, es decir, cuando aparece por la parte media al bajar.
+    { rootMargin: "0px 0px -45% 0px", threshold: 0 }
+  );
+
+  pasos.forEach((paso) => observer.observe(paso));
+})();
