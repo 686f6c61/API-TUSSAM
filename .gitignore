@@ -10,16 +10,29 @@ build/
 .pytest_cache/
 .ruff_cache/
 .playwright-cli/
+.playwright-mcp/
 
-# Entorno
+# Entorno y secretos (nunca subir credenciales: el repo es público)
 .env
+.env.*
+*.env
 *.env.local
+local.env
+secrets.*
+*.pem
+*.key
 .venv/
 venv/
 
 # SQLite WAL/SHM (ficheros temporales de journal)
 *.db-wal
 *.db-shm
+
+# Copias de seguridad y temporales
+*.bak
+*.orig
+*.tmp
+*~
 
 # Logs
 *.log

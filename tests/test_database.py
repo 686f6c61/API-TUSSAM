@@ -4,7 +4,7 @@ Tests para app/database.py - Capa de base de datos.
 
 import pytest
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app import database
 
 
@@ -208,7 +208,7 @@ async def test_tiempos_cache_expired(db_ready):
     import aiosqlite
 
     tiempos = {"parada": "43", "tiempos": []}
-    expired_time = datetime.now() - timedelta(minutes=5)
+    expired_time = datetime.now(timezone.utc) - timedelta(minutes=5)
 
     async with aiosqlite.connect(database.DATABASE_URL) as conn:
         await conn.execute(
@@ -227,7 +227,7 @@ async def test_tiempos_stale_cache_returns_metadata(db_ready):
     import aiosqlite
 
     tiempos = {"parada": "43", "nombre": "Recaredo", "tiempos": []}
-    stale_time = datetime.now() - timedelta(minutes=5)
+    stale_time = datetime.now(timezone.utc) - timedelta(minutes=5)
 
     async with aiosqlite.connect(database.DATABASE_URL) as conn:
         await conn.execute(

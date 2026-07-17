@@ -26,17 +26,6 @@ curl http://localhost:8081/health
 
 La API estará disponible en `http://localhost:8081`. La base de datos incluida (`data/tussam.db`) ya contiene 967 paradas, 49 líneas y 1.756 relaciones.
 
-## App de smoke test
-
-El repositorio incluye una app estática para validar Docker desde el navegador. Permite introducir calle, número y código postal, geocodificar con OpenStreetMap Nominatim y ejecutar `/cercanas` contra la API local.
-
-```bash
-export SYNC_API_KEY=$(openssl rand -hex 32)
-docker compose --profile smoke up -d --build
-```
-
-Abre `http://localhost:8082`. La app llama a la API en `http://localhost:8081` y también permite cambiar la URL base si usas otro puerto.
-
 ## docker-compose.yml
 
 ```yaml
@@ -53,29 +42,19 @@ services:
       - ENABLE_DOCS=${ENABLE_DOCS:-true}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-}
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1}
       - SYNC_ENABLED=true
       - SYNC_DAY=sun
-      - SYNC_HOUR=4
+      - SYNC_HOUR=11
       - SYNC_MINUTE=0
+      - SYNC_MIN_COMPLETENESS_RATIO=0.8
       - SYNC_API_KEY=${SYNC_API_KEY:?Define SYNC_API_KEY antes de arrancar docker compose}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-
-  smoke:
-    image: nginx:1.27-alpine
-    profiles: ["smoke"]
-    container_name: tussam-smoke
-    ports:
-      - "8082:80"
-    volumes:
-      - ./examples/smoke-app:/usr/share/nginx/html:ro
-    depends_on:
-      tussam:
-        condition: service_healthy
     restart: unless-stopped
 ```
 
@@ -85,7 +64,6 @@ services:
 | `volumes: ./data:/app/data` | La DB SQLite persiste entre reinicios |
 | `restart: unless-stopped` | Reinicio automático si falla el proceso |
 | `healthcheck` | Verifica `/health` cada 30s |
-| `profiles: ["smoke"]` | Publica la app de smoke test solo cuando se solicita |
 
 ## Dockerfile
 

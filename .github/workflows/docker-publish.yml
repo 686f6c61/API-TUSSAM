@@ -28,7 +28,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          # setuptools >= 83 corrige PYSEC-2026-3447 (el CVE afecta a la
+          # herramienta de build, no a las dependencias de runtime del paquete).
+          python -m pip install --upgrade pip "setuptools>=83.0.0"
           python -m pip install -e ".[dev]" pip-audit
 
       - name: Compile Python files

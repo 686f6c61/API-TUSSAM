@@ -11,38 +11,53 @@ Gestión de SQLite para almacenar:
 Usa una conexión persistente en modo WAL para mejor rendimiento en lecturas concurrentes.
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.4
-Licencia: MIT
+Versión: 2.0.0
+Licencia: PolyForm Noncommercial 1.0.0 (uso no comercial)
 """
 
 import aiosqlite
+import asyncio
 import logging
-import os
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 import json
+
+from app.env import env_int
 
 logger = logging.getLogger("tussam.database")
 
 
-def _env_int(name: str, default: int, minimum: int = 1) -> int:
-    """Lee enteros de entorno con mínimo para evitar valores inválidos."""
-    try:
-        value = int(os.getenv(name, str(default)))
-    except ValueError:
-        logger.warning("%s inválido; usando %d", name, default)
-        return default
-    return max(minimum, value)
-
-
 # Configuración
 DATABASE_URL = "data/tussam.db"
-CACHE_TTL_SECONDS = _env_int("TIEMPOS_CACHE_TTL_SECONDS", 60)
-STALE_CACHE_TTL_SECONDS = _env_int("TIEMPOS_STALE_TTL_SECONDS", 600)
+CACHE_TTL_SECONDS = env_int("TIEMPOS_CACHE_TTL_SECONDS", 60)
+STALE_CACHE_TTL_SECONDS = env_int("TIEMPOS_STALE_TTL_SECONDS", 600)
 
 # Conexión persistente (se inicializa en startup, se cierra en shutdown)
 _db: Optional[aiosqlite.Connection] = None
+
+# Lock global de escritura.
+#
+# aiosqlite serializa las sentencias en un único hilo, pero la conexión comparte
+# una transacción implícita entre todas las corrutinas. Sin este lock, un
+# `commit()` de una petición cualquiera puede confirmar a medias una transacción
+# multi-sentencia en curso (p. ej. el DELETE + INSERT de las relaciones
+# parada-línea), dejando la base de datos en un estado parcial imposible de
+# revertir. Serializar toda escritura bajo un único lock garantiza que cada
+# transacción completa sea atómica frente a las demás.
+_write_lock: Optional[asyncio.Lock] = None
+
+
+def _get_write_lock() -> asyncio.Lock:
+    """Devuelve el lock de escritura, creándolo de forma perezosa.
+
+    Se crea dentro del event loop en ejecución para evitar vincularlo a un bucle
+    equivocado (relevante en los tests, que crean un loop por caso).
+    """
+    global _write_lock
+    if _write_lock is None:
+        _write_lock = asyncio.Lock()
+    return _write_lock
 
 PARADA_COLUMNS = (
     "codigo, nombre, latitud, longitud, calle, numero, codigo_postal, "
@@ -51,8 +66,13 @@ PARADA_COLUMNS = (
 
 
 def _now_iso() -> str:
-    """SQLite no necesita adaptadores de datetime si guardamos ISO explícito."""
-    return datetime.now().isoformat(timespec="seconds")
+    """SQLite no necesita adaptadores de datetime si guardamos ISO explícito.
+
+    Se usa UTC de forma consistente en toda la aplicación (el scheduler también
+    razona en UTC), evitando saltos de una hora en el TTL de cache por cambios
+    de horario de verano o despliegues en zonas distintas.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -76,20 +96,29 @@ async def get_db() -> aiosqlite.Connection:
 
 
 async def close_db():
-    """Cierra la conexión persistente."""
-    global _db
+    """Cierra la conexión persistente y resetea el lock de escritura."""
+    global _db, _write_lock
     if _db is not None:
         await _db.close()
         _db = None
+    # El lock queda ligado al event loop en su primer uso; al cerrar la
+    # aplicación lo descartamos para que un arranque posterior (o un test con
+    # otro bucle) obtenga uno nuevo y válido.
+    _write_lock = None
 
 
 async def db_health() -> bool:
-    """Verifica que la base de datos responde."""
+    """Verifica que la base de datos responde.
+
+    Registra la causa del fallo: sin log, un contenedor marcado como *unhealthy*
+    no da ninguna pista al operador de por qué la base de datos no responde.
+    """
     try:
         db = await get_db()
         await db.execute("SELECT 1")
         return True
     except Exception:
+        logger.exception("Health check de base de datos fallido")
         return False
 
 
@@ -147,12 +176,25 @@ async def init_db():
         )
     """)
 
-    # Migración: añadir columnas de horarios si no existen
-    for col in ["sublinea", "hora_inicio_ida", "hora_fin_ida", "hora_inicio_vuelta", "hora_fin_vuelta"]:
+    # Migración: añadir columnas de horarios si no existen.
+    #
+    # `sublinea` se declara INTEGER para ser coherente con el CREATE TABLE; el
+    # resto son TEXT. Solo se ignora el error de "columna duplicada" (la columna
+    # ya existe); cualquier otro error —disco lleno, fichero de solo lectura,
+    # base bloqueada— debe propagarse en el arranque en lugar de dejar la app
+    # funcionando con un esquema incompleto que reventaría en cada consulta.
+    for col, col_type in [
+        ("sublinea", "INTEGER"),
+        ("hora_inicio_ida", "TEXT"),
+        ("hora_fin_ida", "TEXT"),
+        ("hora_inicio_vuelta", "TEXT"),
+        ("hora_fin_vuelta", "TEXT"),
+    ]:
         try:
-            await db.execute(f"ALTER TABLE lineas ADD COLUMN {col} TEXT")
-        except Exception:
-            pass  # ya existe
+            await db.execute(f"ALTER TABLE lineas ADD COLUMN {col} {col_type}")
+        except Exception as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
 
     # Relación N:M entre paradas y líneas
     await db.execute("""
@@ -202,6 +244,22 @@ async def count_paradas() -> int:
         return int(row[0])
 
 
+async def count_lineas() -> int:
+    """Cuenta líneas sin cargar la tabla completa."""
+    db = await get_db()
+    async with db.execute("SELECT COUNT(*) FROM lineas") as cursor:
+        row = await cursor.fetchone()
+        return int(row[0])
+
+
+async def count_paradas_lineas() -> int:
+    """Cuenta relaciones parada-línea sin cargar la tabla completa."""
+    db = await get_db()
+    async with db.execute("SELECT COUNT(*) FROM paradas_lineas") as cursor:
+        row = await cursor.fetchone()
+        return int(row[0])
+
+
 async def save_parada(
     codigo: str,
     nombre: str,
@@ -212,14 +270,15 @@ async def save_parada(
 ):
     """Guarda una sola parada en la base de datos."""
     db = await get_db()
-    await db.execute(
-        """
-        INSERT OR REPLACE INTO paradas (codigo, nombre, latitud, longitud, calle, numero, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """,
-        (codigo, nombre, latitud, longitud, calle, numero, _now_iso()),
-    )
-    await db.commit()
+    async with _get_write_lock():
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO paradas (codigo, nombre, latitud, longitud, calle, numero, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+            (codigo, nombre, latitud, longitud, calle, numero, _now_iso()),
+        )
+        await db.commit()
 
 
 async def save_paradas_batch(paradas: List[dict]):
@@ -228,38 +287,39 @@ async def save_paradas_batch(paradas: List[dict]):
     si la parada ya existe y la nueva no trae calle.
     """
     db = await get_db()
-    for p in paradas:
-        calle = p.get("calle")
-        if calle:
-            await db.execute(
-                """
-                INSERT INTO paradas (codigo, nombre, latitud, longitud, calle, numero, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(codigo) DO UPDATE SET
-                    nombre = excluded.nombre,
-                    latitud = excluded.latitud,
-                    longitud = excluded.longitud,
-                    calle = excluded.calle,
-                    numero = excluded.numero,
-                    updated_at = excluded.updated_at
+    async with _get_write_lock():
+        for p in paradas:
+            calle = p.get("calle")
+            if calle:
+                await db.execute(
+                    """
+                    INSERT INTO paradas (codigo, nombre, latitud, longitud, calle, numero, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(codigo) DO UPDATE SET
+                        nombre = excluded.nombre,
+                        latitud = excluded.latitud,
+                        longitud = excluded.longitud,
+                        calle = excluded.calle,
+                        numero = excluded.numero,
+                        updated_at = excluded.updated_at
+                    """,
+                    (p["codigo"], p["nombre"], p["latitud"], p["longitud"],
+                     calle, p.get("numero"), _now_iso()),
+                )
+            else:
+                await db.execute(
+                    """
+                    INSERT INTO paradas (codigo, nombre, latitud, longitud, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(codigo) DO UPDATE SET
+                        nombre = excluded.nombre,
+                        latitud = excluded.latitud,
+                        longitud = excluded.longitud,
+                        updated_at = excluded.updated_at
                 """,
-                (p["codigo"], p["nombre"], p["latitud"], p["longitud"],
-                 calle, p.get("numero"), _now_iso()),
-            )
-        else:
-            await db.execute(
-                """
-                INSERT INTO paradas (codigo, nombre, latitud, longitud, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(codigo) DO UPDATE SET
-                    nombre = excluded.nombre,
-                    latitud = excluded.latitud,
-                    longitud = excluded.longitud,
-                    updated_at = excluded.updated_at
-            """,
-                (p["codigo"], p["nombre"], p["latitud"], p["longitud"], _now_iso()),
-            )
-    await db.commit()
+                    (p["codigo"], p["nombre"], p["latitud"], p["longitud"], _now_iso()),
+                )
+        await db.commit()
 
 
 async def get_parada_by_codigo(codigo: str) -> Optional[dict]:
@@ -294,24 +354,25 @@ async def get_lineas_from_db() -> List[dict]:
 async def save_lineas_batch(lineas: List[dict]):
     """Guarda múltiples líneas con horarios y sublinea."""
     db = await get_db()
-    for linea in lineas:
-        await db.execute(
-            """
-            INSERT OR REPLACE INTO lineas
-            (numero, nombre, color, sublinea,
-             hora_inicio_ida, hora_fin_ida, hora_inicio_vuelta, hora_fin_vuelta,
-             updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                linea["numero"], linea["nombre"], linea["color"],
-                linea.get("sublinea"),
-                linea.get("hora_inicio_ida"), linea.get("hora_fin_ida"),
-                linea.get("hora_inicio_vuelta"), linea.get("hora_fin_vuelta"),
-                _now_iso(),
-            ),
-        )
-    await db.commit()
+    async with _get_write_lock():
+        for linea in lineas:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO lineas
+                (numero, nombre, color, sublinea,
+                 hora_inicio_ida, hora_fin_ida, hora_inicio_vuelta, hora_fin_vuelta,
+                 updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    linea["numero"], linea["nombre"], linea["color"],
+                    linea.get("sublinea"),
+                    linea.get("hora_inicio_ida"), linea.get("hora_fin_ida"),
+                    linea.get("hora_inicio_vuelta"), linea.get("hora_fin_vuelta"),
+                    _now_iso(),
+                ),
+            )
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +479,11 @@ async def _get_tiempos_cache(
         row = await cursor.fetchone()
         if row:
             cached_at = datetime.fromisoformat(row["cached_at"])
-            if datetime.now() - cached_at <= timedelta(seconds=max_age_seconds):
+            # Retrocompatibilidad: las filas escritas antes de migrar a UTC son
+            # naive; se interpretan como UTC para poder compararlas sin error.
+            if cached_at.tzinfo is None:
+                cached_at = cached_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - cached_at <= timedelta(seconds=max_age_seconds):
                 try:
                     data = json.loads(row["tiempos_json"])
                     if include_metadata:
@@ -426,24 +491,48 @@ async def _get_tiempos_cache(
                     return data
                 except json.JSONDecodeError:
                     logger.error("Cache corrupto para parada %s, eliminando", parada_codigo)
-                    await db.execute(
-                        "DELETE FROM tiempos_cache WHERE parada_codigo = ?", (parada_codigo,)
-                    )
-                    await db.commit()
+                    async with _get_write_lock():
+                        await db.execute(
+                            "DELETE FROM tiempos_cache WHERE parada_codigo = ?", (parada_codigo,)
+                        )
+                        await db.commit()
     return None
 
 
 async def save_tiempos_cache(parada_codigo: str, tiempos: dict):
     """Guarda los tiempos de llegada en el cache."""
     db = await get_db()
-    await db.execute(
-        """
-        INSERT OR REPLACE INTO tiempos_cache (parada_codigo, tiempos_json, cached_at)
-        VALUES (?, ?, ?)
-    """,
-        (parada_codigo, json.dumps(tiempos), _now_iso()),
-    )
-    await db.commit()
+    async with _get_write_lock():
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO tiempos_cache (parada_codigo, tiempos_json, cached_at)
+            VALUES (?, ?, ?)
+        """,
+            (parada_codigo, json.dumps(tiempos), _now_iso()),
+        )
+        await db.commit()
+
+
+async def purge_tiempos_cache(max_age_seconds: int = STALE_CACHE_TTL_SECONDS) -> int:
+    """Elimina del cache las filas más antiguas que ``max_age_seconds``.
+
+    Sin esta limpieza la tabla ``tiempos_cache`` crecería indefinidamente si se
+    consultan códigos de parada distintos (incluidos los inexistentes). Se
+    invoca desde el scheduler tras cada sincronización.
+
+    Returns:
+        Número de filas eliminadas.
+    """
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+    ).isoformat(timespec="seconds")
+    db = await get_db()
+    async with _get_write_lock():
+        cursor = await db.execute(
+            "DELETE FROM tiempos_cache WHERE cached_at < ?", (cutoff,)
+        )
+        await db.commit()
+        return cursor.rowcount if cursor.rowcount is not None else 0
 
 
 # ---------------------------------------------------------------------------
@@ -468,18 +557,19 @@ async def update_parada_direccion(
 ):
     """Actualiza todos los campos de dirección de una parada."""
     db = await get_db()
-    await db.execute(
-        """
-        UPDATE paradas
-        SET calle = ?, numero = ?, codigo_postal = ?,
-            municipio = ?, provincia = ?, comunidad_autonoma = ?,
-            direccion_completa = ?
-        WHERE codigo = ?
-    """,
-        (calle, numero, codigo_postal, municipio, provincia,
-         comunidad_autonoma, direccion_completa, codigo),
-    )
-    await db.commit()
+    async with _get_write_lock():
+        await db.execute(
+            """
+            UPDATE paradas
+            SET calle = ?, numero = ?, codigo_postal = ?,
+                municipio = ?, provincia = ?, comunidad_autonoma = ?,
+                direccion_completa = ?
+            WHERE codigo = ?
+        """,
+            (calle, numero, codigo_postal, municipio, provincia,
+             comunidad_autonoma, direccion_completa, codigo),
+        )
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -487,27 +577,52 @@ async def update_parada_direccion(
 # ---------------------------------------------------------------------------
 
 async def save_paradas_lineas_batch(relaciones: List[dict]):
-    """Guarda las relaciones parada-línea. Borra las existentes primero."""
+    """Guarda las relaciones parada-línea. Borra las existentes primero.
+
+    El ``DELETE`` global seguido de los ``INSERT`` se ejecuta como una única
+    transacción bajo el lock de escritura: o se reemplaza toda la tabla, o no se
+    toca nada. Esto evita que una caída a mitad de proceso deje la red de
+    relaciones parcialmente borrada.
+    """
     if not relaciones:
         logger.warning("save_paradas_lineas_batch llamado con lista vacía")
         return
 
     db = await get_db()
-    try:
-        await db.execute("DELETE FROM paradas_lineas")
-        for r in relaciones:
-            await db.execute(
-                """
-                INSERT OR IGNORE INTO paradas_lineas (parada_codigo, linea_numero, sentido, orden)
-                VALUES (?, ?, ?, ?)
-            """,
-                (r["parada_codigo"], r["linea_numero"], r["sentido"], r["orden"]),
-            )
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        logger.error("Error guardando paradas_lineas, rollback ejecutado")
-        raise
+    async with _get_write_lock():
+        try:
+            await db.execute("DELETE FROM paradas_lineas")
+            for r in relaciones:
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO paradas_lineas (parada_codigo, linea_numero, sentido, orden)
+                    VALUES (?, ?, ?, ?)
+                """,
+                    (r["parada_codigo"], r["linea_numero"], r["sentido"], r["orden"]),
+                )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("Error guardando paradas_lineas, rollback ejecutado")
+            raise
+
+
+async def parada_exists(codigo: str) -> bool:
+    """Comprueba si una parada existe en el catálogo."""
+    db = await get_db()
+    async with db.execute(
+        "SELECT 1 FROM paradas WHERE codigo = ? LIMIT 1", (codigo,)
+    ) as cursor:
+        return await cursor.fetchone() is not None
+
+
+async def linea_exists(linea_numero: str) -> bool:
+    """Comprueba si una línea existe en el catálogo."""
+    db = await get_db()
+    async with db.execute(
+        "SELECT 1 FROM lineas WHERE numero = ? LIMIT 1", (linea_numero,)
+    ) as cursor:
+        return await cursor.fetchone() is not None
 
 
 async def get_lineas_de_parada(parada_codigo: str) -> List[str]:

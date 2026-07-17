@@ -5,6 +5,7 @@ Fixtures compartidos para los tests de TUSSAM API.
 import pytest_asyncio
 
 from app import database
+from app.services.tussam import tussam_service
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -14,12 +15,20 @@ async def _use_tmp_db(tmp_path, monkeypatch):
     if database._db is not None:
         await database._db.close()
     database._db = None
+    # Los locks perezosos se ligan al event loop en su primer uso; cada test
+    # tiene su propio bucle, así que hay que descartarlos para no arrastrar uno
+    # vinculado a un loop ya cerrado (lock de escritura de la DB y lock de sync
+    # del servicio).
+    database._write_lock = None
+    tussam_service._sync_lock = None
     db_path = str(tmp_path / "test.db")
     monkeypatch.setattr(database, "DATABASE_URL", db_path)
     yield db_path
     if database._db is not None:
         await database._db.close()
     database._db = None
+    database._write_lock = None
+    tussam_service._sync_lock = None
 
 
 @pytest_asyncio.fixture

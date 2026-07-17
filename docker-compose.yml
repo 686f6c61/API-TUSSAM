@@ -7,31 +7,32 @@ services:
     volumes:
       - ./data:/app/data
     environment:
+      # Valores por defecto pensados para arranque local. En producción, fija
+      # APP_ENV=production (desactiva /docs y activa HSTS), CORS_ORIGINS con la
+      # lista blanca de orígenes, ALLOWED_HOSTS con tu dominio y TRUSTED_PROXY_IPS
+      # con la IP del proxy para que el rate limiting distinga clientes reales.
       - APP_ENV=${APP_ENV:-development}
       - ENABLE_DOCS=${ENABLE_DOCS:-true}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-}
+      # uvicorn confía en X-Forwarded-* solo desde estas IPs (por defecto, red local).
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1}
       - SYNC_ENABLED=true
       - SYNC_DAY=sun
-      - SYNC_HOUR=4
+      # Hora en UTC. Se sincroniza a mediodía (11:00 UTC = 13:00 en Sevilla) para
+      # capturar la red con todas las líneas en servicio: la API de TUSSAM solo
+      # lista las líneas activas en ese instante, así que sincronizar de madrugada
+      # devolvería una red incompleta.
+      - SYNC_HOUR=11
       - SYNC_MINUTE=0
+      # Proporción mínima del catálogo actual que un sync debe recuperar para
+      # reemplazarlo (0.8 = 80 %). Protege frente a sincronizaciones parciales.
+      - SYNC_MIN_COMPLETENESS_RATIO=0.8
       - SYNC_API_KEY=${SYNC_API_KEY:?Define SYNC_API_KEY antes de arrancar docker compose}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-
-  smoke:
-    image: nginx:1.27-alpine
-    profiles: ["smoke"]
-    container_name: tussam-smoke
-    ports:
-      - "8082:80"
-    volumes:
-      - ./examples/smoke-app:/usr/share/nginx/html:ro
-    depends_on:
-      tussam:
-        condition: service_healthy
     restart: unless-stopped

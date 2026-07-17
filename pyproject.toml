@@ -1,14 +1,17 @@
 [project]
 name = "tussam-api"
-version = "1.0.4"
+version = "2.0.0"
 description = "API para horarios y paradas de TUSSAM (Sevilla)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
 authors = [
     {name = "686f6c61"}
 ]
 keywords = ["tussam", "sevilla", "bus", "transit", "api", "realtime"]
+# PolyForm Noncommercial no es una licencia aprobada por la OSI, por lo que NO se
+# usa el clasificador "License :: OSI Approved"; la licencia se declara arriba.
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -40,6 +43,8 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# setuptools >= 77 es necesario para la expresión de licencia SPDX (PEP 639)
+# usada en [project].license (LicenseRef-PolyForm-Noncommercial-1.0.0).
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"

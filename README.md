@@ -2,7 +2,7 @@
 
 API REST para obtener horarios y paradas de TUSSAM (Transportes Urbanos de Sevilla) en tiempo real. Diseñada para alimentar apps, webs, integraciones y cualquier cliente HTTP.
 
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Licencia: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/Licencia-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-teal.svg)](https://fastapi.tiangolo.com/)
 
@@ -201,15 +201,6 @@ docker compose up -d
 
 La API estará en `http://localhost:8081`. La base de datos con 967 paradas viene incluida en el repositorio y se monta como volumen.
 
-### Smoke test en navegador
-
-```bash
-export SYNC_API_KEY=$(openssl rand -hex 32)
-docker compose --profile smoke up -d --build
-```
-
-Abre `http://localhost:8082`. La app de `examples/smoke-app` permite convertir calle, número y código postal en coordenadas con OpenStreetMap Nominatim y probar `/cercanas` contra el Docker local.
-
 ### Con Python (desarrollo)
 
 ```bash
@@ -246,7 +237,8 @@ curl "http://localhost:8081/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2"
       "numero": "6-7",
       "codigo_postal": "41003",
       "municipio": "Sevilla",
-      "direccion": "Calle Recaredo 6-7",
+      "direccion_completa": "Calle Recaredo 6-7",
+      "tiempos_status": "ok",
       "tiempos": [
         {
           "linea": "C4",
@@ -351,29 +343,33 @@ SYNC_MINUTE=0       # Minuto
 
 ## Rate Limiting
 
-La API implementa dos niveles de rate limiting para protegerse y proteger a TUSSAM:
+La API aplica dos cubos de rate limiting **de forma conjunta**, no como alternativa. Cada petición se contabiliza en el cubo de su IP y, si trae un `X-Device-ID` válido, también en el de ese dispositivo. Se responde `429` si **cualquiera** de los dos supera su límite, de modo que el identificador de dispositivo (que elige el cliente) nunca sirve para saltarse el techo por IP:
 
 | Nivel | Límite | Cabecera | Propósito |
 |-------|--------|----------|-----------|
-| Dispositivo | 60 req/min | `X-Device-ID` | Limitar por cliente/dispositivo |
-| IP (fallback) | 300 req/min | Dirección IP | Protección anti-DDoS |
+| IP | 300 req/min | Dirección IP real | Techo anti-DDoS, siempre aplicado |
+| Dispositivo | 60 req/min | `X-Device-ID` | Sublímite más estricto por cliente |
 
-Las cabeceras `X-RateLimit-Remaining`, `X-RateLimit-Limit` y `X-RateLimit-Reset` se incluyen en cada respuesta. Cuando se alcanza el límite, la API responde `429 Too Many Requests` con `Retry-After`. Este limitador es local al proceso; para despliegues con varios workers o réplicas conviene aplicar límites también en el proxy, CDN o balanceador.
+Las cabeceras `X-RateLimit-Remaining`, `X-RateLimit-Limit` y `X-RateLimit-Reset` se incluyen en cada respuesta (reportan el cubo más restrictivo). Cuando se alcanza el límite, la API responde `429 Too Many Requests` con `Retry-After`. El endpoint `/health` está exento.
+
+**Detrás de un proxy:** el contenedor arranca uvicorn con `--proxy-headers`, y la variable `TRUSTED_PROXY_IPS` controla desde qué IPs se acepta `X-Forwarded-For` para derivar la IP real del cliente. Sin configurarla, se limita por la IP de conexión directa. Este limitador es local al proceso: despliega con un solo worker y escala por réplicas; para un límite global real, externaliza el estado (Redis) o aplica límites también en el proxy o CDN.
 
 ---
 
 ## Seguridad
 
-- **Endpoints públicos** (`GET`): sin autenticación, protegidos solo por rate limiting.
-- **Endpoints de sync** (`POST /sync/*`): requieren API Key mediante cabecera `X-API-Key`.
-- **CORS**: restringido a métodos `GET` y `POST`; los orígenes se configuran con `CORS_ORIGINS`.
-- **Docs**: activas por defecto en desarrollo, configurables con `ENABLE_DOCS`.
-- **Hosts**: se pueden limitar con `ALLOWED_HOSTS` cuando hay dominios de despliegue conocidos.
-- **API Key**: `SYNC_API_KEY` no tiene valor por defecto. Define una clave aleatoria antes de arrancar.
+- **Endpoints públicos** (`GET`): sin autenticación, protegidos por rate limiting y validación de formato de parámetros en el borde (los códigos de parada deben ser numéricos; los de línea, alfanuméricos).
+- **Endpoints de sync** (`POST /sync/*`): requieren API Key mediante cabecera `X-API-Key`, comparada con `hmac.compare_digest` para evitar *timing attacks*. Solo se ejecuta una sincronización a la vez (`409` si hay otra en curso).
+- **Cabeceras de seguridad HTTP**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` en todas las respuestas, y `Strict-Transport-Security` en producción.
+- **Cliente saliente**: `follow_redirects` desactivado hacia el origen para evitar SSRF por redirecciones no previstas.
+- **CORS**: restringido a métodos `GET` y `POST`; los orígenes se configuran con `CORS_ORIGINS` (vacío por defecto en producción).
+- **Docs**: activas por defecto en desarrollo, desactivadas en producción; configurables con `ENABLE_DOCS`.
+- **Hosts**: se pueden limitar con `ALLOWED_HOSTS` (localhost se añade siempre para no romper el health check).
+- **API Key**: `SYNC_API_KEY` no tiene valor por defecto. El servicio rechaza operar (`503`) si falta o conserva el valor de ejemplo. `ALLOW_UNAUTHENTICATED_SYNC` se bloquea en producción.
 
 ```bash
-# Ejemplo con API Key
-curl -X POST http://localhost:8081/sync/all -H "X-API-Key: mi-clave-segura"
+# Ejemplo con API Key (define la clave en tu entorno, nunca en el repositorio)
+curl -X POST http://localhost:8081/sync/all -H "X-API-Key: $SYNC_API_KEY"
 ```
 
 ---
@@ -387,14 +383,17 @@ curl -X POST http://localhost:8081/sync/all -H "X-API-Key: mi-clave-segura"
 | `ALLOW_UNAUTHENTICATED_SYNC` | `false` | Permite sync sin API key solo para desarrollo local explícito |
 | `ENABLE_DOCS` | `true` en dev, `false` en prod | Habilitar `/docs`, `/redoc` y `/openapi.json` |
 | `CORS_ORIGINS` | `*` en dev, vacío en prod | Orígenes CORS separados por coma |
-| `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma |
+| `ALLOWED_HOSTS` | vacío | Hosts permitidos separados por coma (localhost se añade siempre) |
+| `TRUSTED_PROXY_IPS` | vacío | IPs de proxy de las que se acepta `X-Forwarded-For` para el rate limiting |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | IPs de las que uvicorn confía en las cabeceras `X-Forwarded-*` |
 | `TIEMPOS_CACHE_TTL_SECONDS` | `60` | TTL de cache fresca para tiempos de llegada |
 | `TIEMPOS_STALE_TTL_SECONDS` | `600` | Tiempo máximo para devolver cache antigua si TUSSAM falla |
 | `TUSSAM_MAX_CONCURRENT_REQUESTS` | `4` | Límite de concurrencia saliente hacia TUSSAM |
 | `TUSSAM_SYNC_REQUEST_DELAY_SECONDS` | `0.2` | Pausa entre peticiones de sincronización a TUSSAM |
+| `SYNC_MIN_COMPLETENESS_RATIO` | `0.8` | Proporción mínima del catálogo actual que un sync debe recuperar para reemplazarlo (protege frente a sincronizaciones en franjas de baja actividad) |
 | `SYNC_ENABLED` | `true` | Activar scheduler semanal |
 | `SYNC_DAY` | `sun` | Día de la semana para sync |
-| `SYNC_HOUR` | `4` | Hora UTC para sync |
+| `SYNC_HOUR` | `11` | Hora UTC para sync (mediodía, con la red en servicio) |
 | `SYNC_MINUTE` | `0` | Minuto para sync |
 
 ---
@@ -405,8 +404,9 @@ curl -X POST http://localhost:8081/sync/all -H "X-API-Key: mi-clave-segura"
 TUSSAM/
 ├── app/
 │   ├── __init__.py          # Paquete principal
-│   ├── main.py              # Endpoints FastAPI, rate limiting, auth
-│   ├── database.py          # SQLite: esquema, queries, conexión persistente
+│   ├── main.py              # Endpoints FastAPI, rate limiting, auth, cabeceras de seguridad
+│   ├── database.py          # SQLite: esquema, queries, conexión persistente, lock de escritura
+│   ├── env.py               # Lectura centralizada de variables de entorno
 │   ├── scheduler.py          # Scheduler semanal con APScheduler
 │   └── services/
 │       └── tussam.py        # Cliente HTTP para API TUSSAM y Nominatim
@@ -415,13 +415,11 @@ TUSSAM/
 │   └── docker.md            # Guía de despliegue con Docker
 ├── tests/
 │   ├── conftest.py           # Fixtures compartidos
-│   ├── test_database.py      # 22 tests de base de datos
-│   ├── test_main.py          # 39 tests de endpoints
-│   ├── test_tussam_service.py # 27 tests del servicio
-│   ├── test_scheduler.py     # 8 tests del scheduler
-│   └── test_e2e.py           # 30 tests end-to-end
-├── examples/
-│   └── smoke-app/            # App estática para validar Docker en navegador
+│   ├── test_database.py      # Tests de base de datos
+│   ├── test_main.py          # Tests de endpoints
+│   ├── test_tussam_service.py # Tests del servicio
+│   ├── test_scheduler.py     # Tests del scheduler
+│   └── test_e2e.py           # Tests end-to-end (requieren red)
 ├── data/                     # Base de datos SQLite (incluida en repo)
 ├── docker-compose.yml
 ├── Dockerfile
@@ -430,6 +428,10 @@ TUSSAM/
 ├── CHANGELOG.md
 └── README.md
 ```
+
+> La web (landing, documentación y mapa de paradas) no vive en esta rama: es un
+> sitio estático que se sirve desde la rama [`landing`](https://github.com/686f6c61/API-TUSSAM/tree/landing)
+> mediante GitHub Pages, en `https://tussam.686f6c61.dev/`.
 
 ---
 
@@ -457,14 +459,30 @@ pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_scheduler.py
 pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_scheduler.py --cov=app
 ```
 
-88 tests unitarios cubren:
-- **Base de datos**: esquema, CRUD, cache, migraciones, transacciones
-- **Endpoints**: todas las rutas, códigos HTTP, validación de parámetros, GeoJSON
-- **Servicio TUSSAM**: paradas cercanas, bearing, rate limiting, sync
+97 tests unitarios cubren:
+- **Base de datos**: esquema, CRUD, cache (con TTL en UTC), migraciones, transacciones bajo lock de escritura
+- **Endpoints**: todas las rutas, códigos HTTP, validación de formato de parámetros, GeoJSON
+- **Servicio TUSSAM**: paradas cercanas, bearing, rate limiting combinado, sync con conteo de fallos
 - **Scheduler**: jobs, variables de entorno, manejo de errores
+
+Los tests de `test_e2e.py` golpean la API real de TUSSAM y solo pasan si el origen está accesible (no bloqueado por Cloudflare); no forman parte de la suite determinista.
+
+---
+
+## Web: landing, documentación y mapa
+
+El sitio web es estático (HTML/CSS/JS, sin backend) y **vive en la rama [`landing`](https://github.com/686f6c61/API-TUSSAM/tree/landing)**, no en `main`. Se publica con GitHub Pages en `https://tussam.686f6c61.dev/` e incluye:
+
+- **Landing** de presentación de la API.
+- **Documentación** web navegable: autenticación, rate limiting, resiliencia, referencia completa de endpoints con ejemplos, códigos de error y variables de entorno.
+- **Mapa de paradas** interactivo con búsqueda y filtros por línea y por zona.
+
+Para trabajar en la web, sitúate en la rama `landing` y sírvela con cualquier servidor estático (`python3 -m http.server`).
 
 ---
 
 ## Licencia
 
-MIT — ver [LICENSE](LICENSE).
+**PolyForm Noncommercial License 1.0.0** — ver [LICENSE](LICENSE).
+
+Puedes usar, modificar y distribuir este software **solo con fines no comerciales**: uso personal, investigación, educación y organizaciones sin ánimo de lucro. Para cualquier uso comercial, contacta con el autor. Es un proyecto independiente sin relación con TUSSAM.

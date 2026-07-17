@@ -315,7 +315,8 @@ curl "http://localhost:8080/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2&beari
        "numero": "6-7",
        "codigo_postal": "41003",
        "municipio": "Sevilla",
-       "direccion": "Calle Recaredo 6-7",
+       "direccion_completa": "Calle Recaredo 6-7",
+       "tiempos_status": "ok",
       "tiempos": [
         {
           "linea": "01",
@@ -367,11 +368,12 @@ curl "http://localhost:8080/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2&beari
 
 **Comportamiento importante:**
 
-- Si TUSSAM esta caida, `/cercanas` **siempre devuelve 200**. Cuando no hay cache utilizable, las paradas aparecen con `"tiempos": []`.
+- Si TUSSAM esta caida, `/cercanas` **siempre devuelve 200**. Cada parada incluye `tiempos_status` para distinguir los casos: `ok` (consulta correcta; la lista vacia significa que no vienen buses), `unavailable` (el origen no respondio y no habia cache) o `error` (fallo inesperado).
+- Cuando los tiempos provienen de cache antigua, la parada añade `stale: true` y `cached_at` con el instante de la ultima consulta buena.
 - Los tiempos se cachean **1 minuto**. Peticiones repetidas en ese intervalo no golpean la API de TUSSAM.
-- Las peticiones simultaneas a una misma parada comparten una sola llamada saliente.
-- Los campos `numero`, `codigo_postal`, `municipio`, `provincia`, `comunidad_autonoma` y `updated_at` **no se incluyen** en `/cercanas`. Para obtenerlos, usar `GET /paradas/{codigo}`.
-- El filtro `lineas` convierte automaticamente a mayusculas (`c4` → `C4`).
+- Las peticiones simultaneas a una misma parada comparten una sola llamada saliente, y las de distintas paradas se resuelven en paralelo.
+- El campo de direccion se llama `direccion_completa` (unificado con `GET /paradas/{codigo}`). Los campos `provincia`, `comunidad_autonoma` y `updated_at` **no se incluyen** en `/cercanas`; para obtenerlos, usar `GET /paradas/{codigo}`.
+- El filtro `lineas` convierte automaticamente a mayusculas y normaliza espacios (`c4, 01` → `{"C4", "01"}`).
 - El filtro `tiempo_max` excluye tiempos negativos (buses ya en la parada).
 
 **Errores:**
@@ -386,6 +388,7 @@ curl "http://localhost:8080/cercanas?lat=37.3891&lon=-5.9845&max_paradas=2&beari
 | 422 | `radio` fuera de [50, 2000] |
 | 422 | `max_paradas` fuera de [1, 10] |
 | 422 | `bearing_tolerance` fuera de [0, 180] |
+| 429 | Rate limit superado (ver cabecera `Retry-After`) |
 | 422 | `tiempo_max` negativo |
 
 ---
@@ -1116,13 +1119,12 @@ TUSSAM/
 ├── app/
 │   ├── main.py              # Endpoints FastAPI + rate limiting + auth
 │   ├── database.py           # SQLite: tablas, queries, cache
+│   ├── env.py                # Lectura centralizada de variables de entorno
 │   ├── scheduler.py          # Sync semanal automatico (APScheduler)
 │   └── services/
 │       └── tussam.py         # Cliente API TUSSAM + geocodificacion Nominatim
 ├── data/
 │   └── tussam.db             # SQLite con datos precargados (967 paradas, 49 lineas)
-├── examples/
-│   └── smoke-app/            # App estática para validar Docker en navegador
 ├── tests/
 │   ├── conftest.py           # Fixtures compartidas
 │   ├── test_database.py      # 22 tests de base de datos
@@ -1178,4 +1180,4 @@ TUSSAM/
 
 ## Licencia
 
-MIT - [686f6c61](https://github.com/686f6c61)
+PolyForm Noncommercial License 1.0.0 - [686f6c61](https://github.com/686f6c61). Uso permitido solo con fines no comerciales; ver el fichero `LICENSE`.

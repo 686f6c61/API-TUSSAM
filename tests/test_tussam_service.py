@@ -9,7 +9,7 @@ import asyncio
 import httpx
 from unittest.mock import AsyncMock, patch, MagicMock
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app import database
 from app.services.tussam import TussamService
@@ -291,7 +291,7 @@ async def test_get_tiempos_stale_cache_on_upstream_error(service, db_ready):
             }
         ],
     }
-    stale_time = datetime.now() - timedelta(minutes=5)
+    stale_time = datetime.now(timezone.utc) - timedelta(minutes=5)
 
     async with aiosqlite.connect(database.DATABASE_URL) as conn:
         await conn.execute(
@@ -422,3 +422,61 @@ async def test_get_paradas_de_linea(service, db_with_relations):
     codigos = {p["codigo"] for p in result}
     assert "43" in codigos
     assert "252" in codigos
+
+
+# ── Guardián de completitud del sync ─────────────────────────────────
+
+def test_guard_completeness_primera_carga(service):
+    """Sin catálogo previo no hay nada que proteger: nunca aborta."""
+    service._guard_completeness("líneas", recibidos=0, actuales=0)  # no lanza
+
+
+def test_guard_completeness_datos_completos(service):
+    """Si lo recibido alcanza el mínimo, no aborta."""
+    service.sync_min_completeness_ratio = 0.8
+    # 45 recibidos frente a 49 almacenados: 45 >= 49*0.8 (39,2) -> ok
+    service._guard_completeness("líneas", recibidos=45, actuales=49)
+
+
+def test_guard_completeness_datos_parciales(service):
+    """Un sync de franja de baja actividad (pocos datos) debe abortar."""
+    service.sync_min_completeness_ratio = 0.8
+    # 6 líneas activas frente a 49 almacenadas: 6 < 49*0.8 -> aborta
+    with pytest.raises(RuntimeError, match="incompleto"):
+        service._guard_completeness("líneas", recibidos=6, actuales=49)
+
+
+def test_guard_completeness_ratio_configurable(service):
+    """Con ratio 0 el guardián queda desactivado (acepta cualquier cantidad)."""
+    service.sync_min_completeness_ratio = 0.0
+    service._guard_completeness("relaciones", recibidos=1, actuales=1756)  # no lanza
+
+
+@pytest.mark.asyncio
+async def test_sync_paradas_lineas_aborta_si_parcial(service, db_with_relations):
+    """El sync destructivo de relaciones aborta si el origen lista pocas líneas.
+
+    Simula la respuesta de una franja de baja actividad: una sola línea activa,
+    que generaría muchas menos relaciones que las ya almacenadas.
+    """
+    service.sync_min_completeness_ratio = 0.8
+    respuesta = MagicMock()
+    respuesta.status_code = 200
+    respuesta.headers = {}
+    respuesta.json.return_value = {
+        "result": {"lineasDisponibles": [{"linea": 1, "labelLinea": "01"}]}
+    }
+    nodos = MagicMock()
+    nodos.status_code = 200
+    nodos.headers = {}
+    nodos.json.return_value = {"result": [{"codigo": "43"}]}
+
+    relaciones_antes = await database.count_paradas_lineas()
+    with patch.object(service, "_get_with_retry", new_callable=AsyncMock) as mock_get:
+        # Primera llamada: lista de líneas; siguientes: nodos de cada sentido.
+        mock_get.side_effect = [respuesta, nodos, nodos]
+        with pytest.raises(RuntimeError, match="incompleto"):
+            await service.sync_paradas_lineas_from_api()
+
+    # La tabla no se ha tocado: sigue con las relaciones originales.
+    assert await database.count_paradas_lineas() == relaciones_antes

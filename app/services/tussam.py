@@ -10,45 +10,29 @@ Gestiona:
 - Sincronización de datos
 
 Autor: 686f6c61 (https://github.com/686f6c61)
-Versión: 1.0.4
-Licencia: MIT
+Versión: 2.0.0
+Licencia: PolyForm Noncommercial 1.0.0 (uso no comercial)
 """
 
 import httpx
+import json
 from datetime import datetime
 from typing import List, Optional
 import app.database as db
 import logging
 import asyncio
 import math
-import os
 
-logging.basicConfig(level=logging.INFO)
+from app.env import env_int, env_float
+
+# La configuración del logging es responsabilidad del arranque de la aplicación
+# (o del servidor: uvicorn/gunicorn). Llamar a logging.basicConfig al importar
+# un módulo sobreescribiría esa configuración global de forma inesperada.
 logger = logging.getLogger(__name__)
 
 # URLs de las APIs externas
 BASE_URL = "https://reddelineas.tussam.es"
 NOMINATIM_API_URL = "https://nominatim.openstreetmap.org/reverse"
-
-
-def _env_int(name: str, default: int, minimum: int = 1) -> int:
-    """Lee enteros de entorno con mínimo para evitar configuración peligrosa."""
-    try:
-        value = int(os.getenv(name, str(default)))
-    except ValueError:
-        logger.warning("%s inválido; usando %d", name, default)
-        return default
-    return max(minimum, value)
-
-
-def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
-    """Lee floats de entorno con mínimo para pausas y timeouts."""
-    try:
-        value = float(os.getenv(name, str(default)))
-    except ValueError:
-        logger.warning("%s inválido; usando %.2f", name, default)
-        return default
-    return max(minimum, value)
 
 
 class TussamService:
@@ -62,20 +46,37 @@ class TussamService:
     """
 
     def __init__(self):
-        self.max_concurrent_tussam_requests = _env_int(
+        self.max_concurrent_tussam_requests = env_int(
             "TUSSAM_MAX_CONCURRENT_REQUESTS", 4
         )
-        self.sync_request_delay_seconds = _env_float(
+        self.sync_request_delay_seconds = env_float(
             "TUSSAM_SYNC_REQUEST_DELAY_SECONDS", 0.2
+        )
+        # Guardián de completitud del sync. La API de TUSSAM solo lista las líneas
+        # ACTIVAS en el instante de la consulta, así que un sync en una franja de
+        # baja actividad (madrugada) devuelve una fracción de la red. Si los datos
+        # recibidos son menores que esta proporción del catálogo ya almacenado, el
+        # sync se aborta sin tocar nada, para no degradar la red guardada. Con 0.8
+        # se exige recuperar al menos el 80 % de lo que ya se conoce.
+        self.sync_min_completeness_ratio = env_float(
+            "SYNC_MIN_COMPLETENESS_RATIO", 0.8, minimum=0.0
         )
         self._tussam_semaphore = asyncio.Semaphore(
             self.max_concurrent_tussam_requests
         )
         self._tiempos_locks: dict[str, asyncio.Lock] = {}
         self._tiempos_locks_guard = asyncio.Lock()
+        # Lock de sincronización compartido entre los endpoints /sync/* y el job
+        # del scheduler, para que un sync manual y el semanal no se solapen sobre
+        # el mismo catálogo. Perezoso para ligarlo al event loop correcto.
+        self._sync_lock: Optional[asyncio.Lock] = None
+        # follow_redirects=False: la ruta hacia el upstream incorpora el código
+        # de parada. Seguir redirecciones a ciegas podría llevar la petición a un
+        # host no previsto (SSRF) si el origen o un intermediario devolviera un
+        # 3xx. La API de TUSSAM responde directamente sin redirigir.
         self.client = httpx.AsyncClient(
             timeout=30.0,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
                 "Accept": "application/json",
@@ -83,6 +84,41 @@ class TussamService:
             },
         )
         self.base_url = BASE_URL
+
+    def _guard_completeness(self, entidad: str, recibidos: int, actuales: int) -> None:
+        """Aborta el sync si los datos recibidos son sospechosamente incompletos.
+
+        Compara la cantidad recuperada del origen con la ya almacenada. Si hay
+        catálogo previo (``actuales > 0``) y lo recibido no alcanza la proporción
+        mínima configurada, lanza ``RuntimeError`` para preservar el último estado
+        bueno en lugar de sustituirlo por una foto parcial (típico de sincronizar
+        en una franja horaria con pocas líneas en servicio).
+
+        Args:
+            entidad: Nombre legible de lo que se sincroniza (para el mensaje).
+            recibidos: Elementos obtenidos del origen en este sync.
+            actuales: Elementos ya presentes en la base de datos.
+        """
+        if actuales <= 0:
+            return  # Primera carga: no hay nada que proteger.
+        minimo = actuales * self.sync_min_completeness_ratio
+        if recibidos < minimo:
+            raise RuntimeError(
+                f"Sync de {entidad} incompleto: {recibidos} recibidos frente a "
+                f"{actuales} almacenados (mínimo exigido {minimo:.0f}). "
+                f"Probable sincronización en franja de baja actividad; "
+                f"no se reemplaza el catálogo."
+            )
+
+    def get_sync_lock(self) -> asyncio.Lock:
+        """Devuelve el lock de sincronización, creándolo de forma perezosa.
+
+        Compartido por los endpoints /sync/* y el scheduler para garantizar que
+        solo se ejecuta una sincronización a la vez en todo el proceso.
+        """
+        if self._sync_lock is None:
+            self._sync_lock = asyncio.Lock()
+        return self._sync_lock
 
     async def close(self):
         """Cierra el cliente HTTP al apagar la aplicación."""
@@ -96,7 +132,7 @@ class TussamService:
         """
         if dt is None:
             dt = datetime.now()
-        return dt.strftime("%d-%m-%YT%H:%M:%S").replace(":", "%3A").replace("/", "-")
+        return dt.strftime("%d-%m-%YT%H:%M:%S").replace(":", "%3A")
 
     def _coords_to_tussam(self, lat: float, lon: float) -> tuple:
         """
@@ -134,7 +170,16 @@ class TussamService:
         lineas = lineas_data.get("lineasDisponibles", [])
         logger.info(f"Found {len(lineas)} lineas")
 
+        # Una lista de líneas vacía significa que el origen no devolvió datos
+        # útiles (Cloudflare, cambio de contrato, 200 con HTML). Continuar
+        # guardaría 0 paradas y reportaría un falso éxito, así que abortamos.
+        if not lineas:
+            raise RuntimeError(
+                "TUSSAM no devolvió líneas disponibles; se aborta el sync de paradas"
+            )
+
         todas_paradas: dict = {}
+        fallos = 0
 
         # Paso 2: por cada línea, obtener los nodos (paradas) en ambos sentidos
         # Sentido 1 = ida, Sentido 2 = vuelta
@@ -170,13 +215,26 @@ class TussamService:
                                 "numero": None,
                             }
                 except Exception as e:
+                    fallos += 1
                     logger.warning(
                         f"Error fetching nodos for linea {linea_num} sentido {sentido}: {e}"
                     )
                     continue
                 await asyncio.sleep(self.sync_request_delay_seconds)
 
-        logger.info(f"Total unique paradas found: {len(todas_paradas)}")
+        logger.info(
+            "Total unique paradas found: %d (%d fallos de nodos)",
+            len(todas_paradas), fallos,
+        )
+        # Si no se recuperó ninguna parada pese a haber líneas, el sync ha
+        # fallado de facto: no machacamos el catálogo con una lista vacía.
+        if not todas_paradas:
+            raise RuntimeError(
+                f"Sync de paradas sin resultados ({fallos} fallos de nodos); no se guarda nada"
+            )
+        # Aborta si la foto es sospechosamente parcial (sync en franja de baja
+        # actividad), para no refrescar solo un subconjunto del catálogo.
+        self._guard_completeness("paradas", len(todas_paradas), await db.count_paradas())
         await db.save_paradas_batch(list(todas_paradas.values()))
         return len(todas_paradas)
 
@@ -299,6 +357,11 @@ class TussamService:
         result_data = data.get("result", {})
         result = result_data.get("lineasDisponibles", [])
 
+        if not result:
+            raise RuntimeError(
+                "TUSSAM no devolvió líneas disponibles; se aborta el sync de líneas"
+            )
+
         lineas = []
         for item in result:
             destinos = item.get("destinos", [])
@@ -317,6 +380,9 @@ class TussamService:
                 "hora_fin_vuelta": vuelta.get("horaFin"),
             })
 
+        # Aborta si el origen devolvió muchas menos líneas de las conocidas
+        # (franja de baja actividad), en vez de refrescar solo las activas.
+        self._guard_completeness("líneas", len(lineas), await db.count_lineas())
         await db.save_lineas_batch(lineas)
         return len(lineas)
 
@@ -392,7 +458,13 @@ class TussamService:
         lineas = data.get("result", {}).get("lineasDisponibles", [])
         logger.info(f"Syncing paradas_lineas for {len(lineas)} lineas")
 
+        if not lineas:
+            raise RuntimeError(
+                "TUSSAM no devolvió líneas disponibles; se aborta el sync de relaciones"
+            )
+
         relaciones = []
+        fallos = 0
         for linea in lineas:
             linea_num = linea.get("linea", 0)
             label = str(linea.get("labelLinea", ""))
@@ -415,8 +487,27 @@ class TussamService:
                                 "orden": orden,
                             })
                 except Exception as e:
+                    fallos += 1
                     logger.warning(f"Error nodos linea {label} sentido {sentido}: {e}")
                 await asyncio.sleep(self.sync_request_delay_seconds)
+
+        # save_paradas_lineas_batch hace DELETE global + reinserción. Si hubo
+        # fallos, `relaciones` está incompleta y persistirla borraría las
+        # relaciones de las líneas que fallaron. Abortamos para preservar el
+        # último estado bueno; la tabla no se toca.
+        if fallos:
+            raise RuntimeError(
+                f"Sync de relaciones incompleto: {fallos} fallos de nodos, "
+                f"{len(relaciones)} relaciones parciales. No se reemplaza la tabla."
+            )
+
+        # Guardián de completitud: esta es la operación destructiva (borra y
+        # reinserta). Si el origen listó pocas líneas activas (franja de baja
+        # actividad), `relaciones` sería una fracción de la red y el DELETE la
+        # dejaría mutilada. Abortamos si no alcanza el mínimo del catálogo actual.
+        self._guard_completeness(
+            "relaciones parada-línea", len(relaciones), await db.count_paradas_lineas()
+        )
 
         await db.save_paradas_lineas_batch(relaciones)
         logger.info(f"Synced {len(relaciones)} parada-linea relations")
@@ -478,16 +569,20 @@ class TussamService:
         try:
             max_retries = 1 if stale else 3
             response = await self._get_with_retry(url, max_retries=max_retries)
-        except (httpx.HTTPError, httpx.TimeoutException):
+            # Un JSONDecodeError (200 con HTML de Cloudflare, respuesta truncada)
+            # no es un httpx.HTTPError, así que se captura aquí para poder
+            # aplicar el mismo fallback stale que ante un error de red.
+            data = response.json()
+        except (httpx.HTTPError, httpx.TimeoutException, json.JSONDecodeError, ValueError):
             if stale:
                 logger.warning(
-                    "TUSSAM no disponible para parada %s; devolviendo cache stale",
+                    "TUSSAM no disponible o respuesta inválida para parada %s; "
+                    "devolviendo cache stale",
                     codigo_parada,
                 )
                 return stale
             raise
 
-        data = response.json()
         result = self._normalize_tiempos_result(data.get("result"), codigo_parada)
 
         parada_info = result.get("descripcion", {}).get("texto", "")
@@ -509,7 +604,18 @@ class TussamService:
             sentido = sentidos[0] if len(sentidos) == 1 else None
 
             for est in estimaciones:
-                tiempo_min = est.get("segundos", 0) // 60
+                # Una estimación sin `segundos` no se puede interpretar. Si la
+                # tratáramos como 0 minutos, el bucle la mostraría como "el bus
+                # llega ya" y el orden por tiempo la pondría la primera,
+                # desplazando estimaciones reales. Mejor descartarla.
+                segundos = est.get("segundos")
+                if segundos is None:
+                    logger.debug(
+                        "Estimación sin 'segundos' descartada para parada %s (linea %s)",
+                        codigo_parada, label,
+                    )
+                    continue
+                tiempo_min = segundos // 60
                 destino = est.get("destino", {}).get("texto", "")
 
                 tiempos.append({
@@ -517,22 +623,29 @@ class TussamService:
                     "color": color,
                     "tiempo_minutos": tiempo_min,
                     "destino": destino,
-                    "distancia_metros": est.get("distancia", 0),
+                    "distancia_metros": est.get("distancia"),
                     "vehiculo": est.get("vehiculo"),
                     "atributos": est.get("atributos", []),
                     "sentido": sentido,
                 })
 
+        # latitudE6/longitudE6 ausentes deben quedar como None, no como (0, 0)
+        # —que situaría la parada en el golfo de Guinea—.
+        lat_e6 = posicion.get("latitudE6") if posicion else None
+        lon_e6 = posicion.get("longitudE6") if posicion else None
         result_data = {
             "parada": codigo_parada,
             "nombre": parada_info,
-            "latitud": posicion.get("latitudE6", 0) / 1000000 if posicion else None,
-            "longitud": posicion.get("longitudE6", 0) / 1000000 if posicion else None,
+            "latitud": lat_e6 / 1000000 if lat_e6 else None,
+            "longitud": lon_e6 / 1000000 if lon_e6 else None,
             "tiempos": sorted(tiempos, key=lambda x: x["tiempo_minutos"])[:10],
         }
 
-        # Guardamos en cache
-        await db.save_tiempos_cache(codigo_parada, result_data)
+        # Guardamos en cache. Si la normalización no produjo ni nombre ni
+        # tiempos, el payload del origen era vacío o malformado: no lo cacheamos
+        # para no envenenar la cache con una respuesta falsa "sin buses".
+        if parada_info or result_data["tiempos"]:
+            await db.save_tiempos_cache(codigo_parada, result_data)
         return result_data
 
     def _normalize_tiempos_result(self, result, codigo_parada: str) -> dict:
@@ -584,8 +697,14 @@ class TussamService:
                 provincia = addr.get("county") or addr.get("state_district", "Sevilla")
                 comunidad = addr.get("state", "")
 
-                # Fallback: usar nombre de la parada si no hay calle
+                # Fallback: usar nombre de la parada si Nominatim no da calle.
+                # Se registra explícitamente porque es un dato de menor calidad
+                # que quedará fijado (get_paradas_sin_direccion no lo reprocesa).
                 if not calle:
+                    logger.info(
+                        "Geocode %s sin calle en Nominatim; usando nombre de parada como fallback",
+                        codigo,
+                    )
                     calle = nombre
                     numero = ""
 
@@ -594,8 +713,19 @@ class TussamService:
                         codigo, calle, numero, cp, municipio, provincia,
                         comunidad, f"{calle} {numero}".strip(),
                     )
-        except Exception as e:
-            logger.warning(f"Geocode error {codigo}: {e}")
+            else:
+                # Un 403/429 de Nominatim (política de User-Agent, rate limit)
+                # pasaría inadvertido sin este log, y toda la geocodificación
+                # fallaría en silencio.
+                logger.warning(
+                    "Geocode %s: Nominatim devolvió HTTP %d", codigo, r.status_code
+                )
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.warning("Geocode %s: error de red con Nominatim: %s", codigo, e)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Geocode %s: respuesta no parseable de Nominatim: %s", codigo, e)
+        except Exception:
+            logger.exception("Geocode %s: error inesperado", codigo)
         return (codigo, None, None, None, None, None, None, None)
 
     async def sync_direcciones_all(self) -> dict:

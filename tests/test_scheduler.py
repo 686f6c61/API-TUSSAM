@@ -2,10 +2,21 @@
 Tests para app/scheduler.py - Scheduler de sincronización semanal.
 """
 
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock
 
 from app import scheduler
+
+
+def _real_sync_lock(mock_service):
+    """Configura el servicio mockeado para devolver un lock de sync real.
+
+    El scheduler serializa el job con ``tussam_service.get_sync_lock()``; con el
+    servicio mockeado hay que darle un ``asyncio.Lock`` de verdad para que
+    ``locked()`` y ``async with`` se comporten como en producción.
+    """
+    mock_service.get_sync_lock.return_value = asyncio.Lock()
 
 
 # ── start_scheduler ──────────────────────────────────────────────────
@@ -81,6 +92,7 @@ def test_stop_scheduler_not_running():
 async def test_run_weekly_sync_success():
     """Sync semanal exitoso debe ejecutar todas las fases."""
     with patch("app.scheduler.tussam_service") as mock_service:
+        _real_sync_lock(mock_service)
         mock_service.sync_paradas_from_api = MagicMock(return_value=_async_return(967))
         mock_service.sync_lineas_from_api = MagicMock(return_value=_async_return(43))
         mock_service.sync_paradas_lineas_from_api = MagicMock(return_value=_async_return(1756))
@@ -100,6 +112,7 @@ async def test_run_weekly_sync_success():
 async def test_run_weekly_sync_phase1_error():
     """Si fase 1 falla, no debe ejecutar fase 2 (geocodificación)."""
     with patch("app.scheduler.tussam_service") as mock_service:
+        _real_sync_lock(mock_service)
         mock_service.sync_paradas_from_api = MagicMock(side_effect=Exception("API error"))
         mock_service.sync_direcciones_all = MagicMock(return_value=_async_return({}))
 
@@ -112,6 +125,7 @@ async def test_run_weekly_sync_phase1_error():
 async def test_run_weekly_sync_phase2_error():
     """Si fase 2 falla, no debe propagar la excepción."""
     with patch("app.scheduler.tussam_service") as mock_service:
+        _real_sync_lock(mock_service)
         mock_service.sync_paradas_from_api = MagicMock(return_value=_async_return(967))
         mock_service.sync_lineas_from_api = MagicMock(return_value=_async_return(43))
         mock_service.sync_paradas_lineas_from_api = MagicMock(return_value=_async_return(1756))

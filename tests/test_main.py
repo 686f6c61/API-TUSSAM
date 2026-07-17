@@ -94,12 +94,20 @@ async def test_get_parada_existente(db_with_paradas):
 
 @pytest.mark.asyncio
 async def test_get_parada_no_existe(db_ready):
-    """Parada inexistente debe devolver 404."""
+    """Parada inexistente (código con formato válido) debe devolver 404."""
     client = _make_client()
     with patch("app.main.tussam_service.get_parada_by_codigo", new_callable=AsyncMock) as mock:
         mock.return_value = None
-        r = client.get("/paradas/NOEXISTE")
+        r = client.get("/paradas/9999999")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_parada_formato_invalido(db_ready):
+    """Código con formato no numérico debe rechazarse con 422 en el borde."""
+    client = _make_client()
+    r = client.get("/paradas/NOEXISTE")
+    assert r.status_code == 422
 
 
 # ── GET /paradas/{codigo}/tiempos ────────────────────────────────────
@@ -466,7 +474,7 @@ async def test_max_paradas_maximo(db_ready):
 
 # ── POST /sync/* (autenticación) ─────────────────────────────────────
 
-VALID_SYNC_KEY = "secret-key-12345678901234567890"
+VALID_SYNC_KEY = "clave-de-prueba-para-tests-0123456789"
 
 @pytest.mark.asyncio
 async def test_sync_sin_key_con_env(db_ready, monkeypatch):
@@ -487,6 +495,38 @@ async def test_sync_con_key_correcta(db_ready, monkeypatch):
         mock.return_value = 100
         r = client.post("/sync/paradas", headers={"X-API-Key": VALID_SYNC_KEY})
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_sync_runtime_error_da_502(db_ready, monkeypatch):
+    """Si el sync aborta por falta de datos del origen, el endpoint da 502 (no 500)."""
+    monkeypatch.setenv("SYNC_API_KEY", VALID_SYNC_KEY)
+    client = _make_client()
+    with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mock:
+        mock.side_effect = RuntimeError("TUSSAM no devolvió líneas disponibles")
+        r = client.post("/sync/paradas", headers={"X-API-Key": VALID_SYNC_KEY})
+    assert r.status_code == 502
+    assert "líneas disponibles" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sync_all_parcial(db_ready, monkeypatch):
+    """Si una fase de /sync/all falla, las anteriores conservan su recuento."""
+    monkeypatch.setenv("SYNC_API_KEY", VALID_SYNC_KEY)
+    client = _make_client()
+    with patch("app.main.tussam_service.sync_paradas_from_api", new_callable=AsyncMock) as mp, \
+         patch("app.main.tussam_service.sync_lineas_from_api", new_callable=AsyncMock) as ml, \
+         patch("app.main.tussam_service.sync_paradas_lineas_from_api", new_callable=AsyncMock) as mr:
+        mp.return_value = 967
+        ml.return_value = 49
+        mr.side_effect = RuntimeError("relaciones incompletas")
+        r = client.post("/sync/all", headers={"X-API-Key": VALID_SYNC_KEY})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["paradas"] == 967
+    assert data["lineas"] == 49
+    assert "error" in str(data["paradas_lineas"])
+    assert data["message"] == "Sincronización parcial"
 
 
 @pytest.mark.asyncio
