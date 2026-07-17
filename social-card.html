@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1200, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <title>API TUSSAM · tarjeta social</title>
+    <style>
+      /* Lienzo exacto de una Open Graph card: 1200 x 630. Este fichero se
+         renderiza a og-tussam.png con un navegador headless. */
+      :root {
+        --paper: #f2f1eb;
+        --surface: #fbfaf6;
+        --ink: #141414;
+        --muted: #65645f;
+        --accent: #f7a800;
+        --accent-3: #f54129;
+        --accent-green: #008431;
+        --accent-blue: #000d6f;
+        --font-sans: "Space Grotesk", system-ui, sans-serif;
+        --font-mono: "IBM Plex Mono", monospace;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        width: 1200px;
+        height: 630px;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--font-sans);
+        overflow: hidden;
+      }
+
+      .card {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        padding: 64px 68px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        border: 10px solid var(--ink);
+      }
+
+      /* Franja superior tipo cabecera */
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 30px;
+        font-weight: 700;
+      }
+
+      .brand .tag {
+        padding: 4px 10px;
+        font-family: var(--font-mono);
+        font-size: 15px;
+        font-weight: 500;
+        background: var(--accent);
+        border: 1px solid var(--ink);
+        border-radius: 5px;
+      }
+
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 18px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+
+      .middle { margin-top: 6px; }
+
+      h1 {
+        font-size: 92px;
+        line-height: 0.98;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+
+      h1 mark {
+        background: var(--accent);
+        color: var(--ink);
+        padding: 0 10px;
+        border-radius: 4px;
+      }
+
+      .lede {
+        margin-top: 26px;
+        max-width: 760px;
+        font-size: 26px;
+        line-height: 1.35;
+        color: var(--muted);
+      }
+
+      /* Fila de líneas (marcadores de bus) como detalle temático */
+      .lines {
+        display: flex;
+        gap: 12px;
+        margin-top: 30px;
+      }
+
+      .line-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 52px;
+        height: 40px;
+        padding: 0 12px;
+        color: #fff;
+        font-family: var(--font-mono);
+        font-size: 20px;
+        font-weight: 500;
+        border-radius: 6px;
+      }
+
+      .bottom {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+      }
+
+      .repo {
+        font-family: var(--font-mono);
+        font-size: 20px;
+        color: var(--ink);
+      }
+
+      .repo span { color: var(--muted); }
+
+      .stats {
+        display: flex;
+        gap: 40px;
+        font-family: var(--font-mono);
+      }
+
+      .stat b {
+        display: block;
+        font-family: var(--font-sans);
+        font-size: 34px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .stat span {
+        font-size: 15px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="top">
+        <div class="brand"><span>API TUSSAM</span><span class="tag">REST</span></div>
+        <p class="eyebrow">REST · FastAPI · Sevilla</p>
+      </div>
+
+      <div class="middle">
+        <h1>Una parada.<br><mark>Todos sus tiempos.</mark></h1>
+        <p class="lede">Paradas, líneas y tiempos de llegada de los autobuses de Sevilla en tiempo real, con cache, resiliencia y GeoJSON.</p>
+        <div class="lines">
+          <span class="line-chip" style="background:#f54129">01</span>
+          <span class="line-chip" style="background:#008431">C4</span>
+          <span class="line-chip" style="background:#000d6f">21</span>
+          <span class="line-chip" style="background:#f7a800;color:#141414">27</span>
+          <span class="line-chip" style="background:#84c6e3;color:#141414">32</span>
+        </div>
+      </div>
+
+      <div class="bottom">
+        <p class="repo">github.com/686f6c61/API-TUSSAM <span>· MIT</span></p>
+        <div class="stats">
+          <div class="stat"><b>967</b><span>paradas</span></div>
+          <div class="stat"><b>49</b><span>líneas</span></div>
+          <div class="stat"><b>60 s</b><span>cache</span></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

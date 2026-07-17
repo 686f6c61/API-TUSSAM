@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Documentación de la API TUSSAM: referencia completa de endpoints, autenticación, rate limiting, resiliencia y despliegue de la API REST de autobuses de Sevilla.">
+    <meta name="author" content="686f6c61">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#f2f1eb">
+
+    <meta property="og:type" content="article">
+    <meta property="og:locale" content="es_ES">
+    <meta property="og:site_name" content="API TUSSAM">
+    <meta property="og:url" content="https://686f6c61.github.io/API-TUSSAM/docs.html">
+    <meta property="og:title" content="Documentación · API TUSSAM">
+    <meta property="og:description" content="Referencia completa de la API TUSSAM: endpoints, autenticación, rate limiting, resiliencia, códigos de error y despliegue.">
+    <meta property="og:image" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:creator" content="@686f6c61">
+    <meta name="twitter:title" content="Documentación · API TUSSAM">
+    <meta name="twitter:description" content="Referencia completa de la API REST de los autobuses de Sevilla.">
+    <meta name="twitter:image" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="canonical" href="https://686f6c61.github.io/API-TUSSAM/docs.html">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <title>Documentación · API TUSSAM</title>
+  </head>
+  <body class="docs-body">
+    <a class="skip-link" href="#doc-main">Saltar al contenido</a>
+
+    <header class="site-header">
+      <a class="brand" href="index.html">
+        <span>API TUSSAM</span><mark>DOCS</mark>
+      </a>
+      <nav class="site-nav" aria-label="Navegación principal">
+        <a href="index.html">Inicio</a>
+        <a href="#endpoints">Endpoints</a>
+        <a href="#auth">Autenticación</a>
+        <a href="#despliegue">Despliegue</a>
+      </nav>
+      <a class="header-link" href="https://github.com/686f6c61/API-TUSSAM">GitHub</a>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar" aria-label="Índice de la documentación">
+        <nav>
+          <p class="docs-nav-title">Introducción</p>
+          <a href="#intro">Qué es esta API</a>
+          <a href="#base-url">URL base y formato</a>
+          <a href="#auth">Autenticación</a>
+          <a href="#rate-limit">Rate limiting</a>
+          <a href="#resiliencia">Resiliencia y cache</a>
+          <p class="docs-nav-title">Endpoints de lectura</p>
+          <a href="#ep-cercanas">GET /cercanas</a>
+          <a href="#ep-paradas">GET /paradas</a>
+          <a href="#ep-paradas-cercanas">GET /paradas/cercanas</a>
+          <a href="#ep-parada">GET /paradas/{codigo}</a>
+          <a href="#ep-tiempos">GET /paradas/{codigo}/tiempos</a>
+          <a href="#ep-parada-lineas">GET /paradas/{codigo}/lineas</a>
+          <a href="#ep-lineas">GET /lineas</a>
+          <a href="#ep-linea-paradas">GET /lineas/{n}/paradas</a>
+          <a href="#ep-health">GET /health</a>
+          <p class="docs-nav-title">Administración</p>
+          <a href="#ep-sync">POST /sync/*</a>
+          <p class="docs-nav-title">Referencia</p>
+          <a href="#errores">Códigos de error</a>
+          <a href="#despliegue">Despliegue</a>
+          <a href="#config">Variables de entorno</a>
+        </nav>
+      </aside>
+
+      <main id="doc-main" class="docs-content">
+        <section id="intro">
+          <p class="eyebrow">Documentación · v1.1.0</p>
+          <h1 class="docs-h1">API TUSSAM</h1>
+          <p class="docs-lede">
+            API REST de código abierto para consultar paradas, líneas y tiempos de llegada de los autobuses de TUSSAM (Sevilla) en tiempo real. Actúa como proxy inteligente sobre la API interna de TUSSAM: normaliza los datos, cachea los tiempos, reintenta con criterio ante los errores del origen y expone CORS para poder llamarse desde cualquier cliente.
+          </p>
+          <p>
+            Toda la superficie de lectura es pública y no requiere autenticación. Solo los endpoints de sincronización (escritura) están protegidos por una API key. Las respuestas son JSON con coordenadas en grados decimales; el endpoint agregado admite además salida GeoJSON.
+          </p>
+          <div class="docs-callout">
+            <strong>Proyecto independiente.</strong> Esta API no es oficial ni tiene relación con TUSSAM. Consume su API interna pública de <code>reddelineas.tussam.es</code> de forma responsable (cache y rate limiting) y expone los datos con una interfaz estable.
+          </div>
+        </section>
+
+        <section id="base-url">
+          <h2 class="docs-h2">URL base y formato</h2>
+          <p>
+            En el despliegue con Docker Compose incluido, la API escucha en <code>http://localhost:8081</code>. En producción, la URL base es la de tu propio despliegue. Todos los ejemplos de esta página usan el puerto local.
+          </p>
+          <ul class="docs-list">
+            <li>Todas las respuestas son <code>application/json</code> (salvo <code>formato=geojson</code>, que devuelve un <code>FeatureCollection</code>).</li>
+            <li>Las coordenadas se expresan en grados decimales (WGS84), no en el formato E6 del origen.</li>
+            <li>Cada respuesta incluye cabeceras <code>X-RateLimit-*</code> con la cuota restante.</li>
+            <li>Cabeceras de seguridad activas: <code>X-Content-Type-Options</code>, <code>X-Frame-Options</code>, <code>Referrer-Policy</code> y <code>Strict-Transport-Security</code> en producción.</li>
+          </ul>
+        </section>
+
+        <section id="auth">
+          <h2 class="docs-h2">Autenticación</h2>
+          <p>
+            Los endpoints de lectura son públicos. Los de sincronización (<code>POST /sync/*</code>) exigen la cabecera <code>X-API-Key</code> con el valor de la variable de entorno de la clave de sync. La comparación usa <code>hmac.compare_digest</code> para no filtrar información por tiempo de respuesta.
+          </p>
+          <div class="code-block">
+            <div class="code-block-head"><span>sincronización autenticada</span></div>
+            <pre><code>curl -X POST http://localhost:8081/sync/all \
+  -H "X-API-Key: $MI_CLAVE_DE_SYNC"</code></pre>
+          </div>
+          <p>
+            El servicio se niega a arrancar la operación si la clave está sin definir o conserva el valor de ejemplo (responde <code>503</code>). El flag <code>ALLOW_UNAUTHENTICATED_SYNC</code> permite desactivar la autenticación solo fuera de producción; con <code>APP_ENV=production</code> se rechaza siempre.
+          </p>
+        </section>
+
+        <section id="rate-limit">
+          <h2 class="docs-h2">Rate limiting</h2>
+          <p>
+            Cada petición se contabiliza en dos cubos que se aplican de forma conjunta: uno por IP (techo anti-DDoS) y otro, más estricto, por dispositivo. Se responde <code>429</code> si cualquiera de los dos supera su límite. El identificador de dispositivo solo puede restringir más, nunca saltarse el límite por IP.
+          </p>
+          <table class="docs-table">
+            <thead><tr><th>Ámbito</th><th>Límite</th><th>Clave</th></tr></thead>
+            <tbody>
+              <tr><td>Por IP</td><td>300 req/min</td><td>IP del cliente (real tras proxy de confianza)</td></tr>
+              <tr><td>Por dispositivo</td><td>60 req/min</td><td>Cabecera <code>X-Device-ID</code> (opcional)</td></tr>
+            </tbody>
+          </table>
+          <p>Un cliente que envíe un <code>X-Device-ID</code> estable (por ejemplo, un UUID generado al instalarse) obtiene su propia cuota de 60/min sin competir con el resto de usuarios de su misma IP. Cada respuesta trae:</p>
+          <ul class="docs-list">
+            <li><code>X-RateLimit-Limit</code>: límite aplicable.</li>
+            <li><code>X-RateLimit-Remaining</code>: peticiones restantes en la ventana.</li>
+            <li><code>X-RateLimit-Reset</code>: segundos hasta que se libere cuota.</li>
+            <li><code>Retry-After</code> (solo en 429): segundos que conviene esperar.</li>
+          </ul>
+          <div class="docs-callout">
+            <strong>Escalado.</strong> Los cubos viven en memoria del proceso. Despliega con un solo worker y escala por réplicas; con varios workers, el límite efectivo se multiplicaría. Para un límite global real, externaliza el estado (Redis). El endpoint <code>/health</code> está exento del rate limiting.
+          </div>
+        </section>
+
+        <section id="resiliencia">
+          <h2 class="docs-h2">Resiliencia y cache</h2>
+          <p>
+            El origen (<code>reddelineas.tussam.es</code>) devuelve 429 con facilidad y a veces cambia el formato de la respuesta. La API está construida para que el cliente nunca herede esos problemas:
+          </p>
+          <ul class="docs-list">
+            <li><strong>Cache fresco (TTL 60 s):</strong> los tiempos se sirven desde SQLite; el origen solo se consulta cuando expiran.</li>
+            <li><strong>Single-flight por parada:</strong> muchas peticiones simultáneas a la misma parada generan una sola llamada al origen.</li>
+            <li><strong>Reintentos con backoff:</strong> los 429 y 5xx se reintentan respetando el <code>Retry-After</code> que envíe el origen.</li>
+            <li><strong>Cache stale (hasta 10 min):</strong> si el origen cae, se sirve la última respuesta válida marcada con <code>stale: true</code> y su <code>cached_at</code>.</li>
+          </ul>
+          <p>
+            Los endpoints señalizan siempre el estado del origen para que el cliente distinga «no vienen buses» de «no pudimos consultar»: mediante <code>upstream_status</code> en <code>/paradas/{codigo}/tiempos</code> y <code>tiempos_status</code> por parada en <code>/cercanas</code>.
+          </p>
+        </section>
+
+        <!-- ── ENDPOINTS ─────────────────────────────────────────── -->
+        <section id="endpoints">
+          <h2 class="docs-h2">Referencia de endpoints</h2>
+        </section>
+
+        <section id="ep-cercanas" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/cercanas</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p><strong>Endpoint principal.</strong> Devuelve las paradas más cercanas a una ubicación <em>con</em> sus tiempos de llegada, en una sola llamada. Es el recomendado para apps, webs e integraciones que parten de coordenadas.</p>
+          <h3 class="docs-h3">Parámetros</h3>
+          <table class="docs-table">
+            <thead><tr><th>Parámetro</th><th>Tipo</th><th>Def.</th><th>Descripción</th></tr></thead>
+            <tbody>
+              <tr><td><code>lat</code> <span class="req">obligatorio</span></td><td>float</td><td>—</td><td>Latitud del usuario (−90 a 90)</td></tr>
+              <tr><td><code>lon</code> <span class="req">obligatorio</span></td><td>float</td><td>—</td><td>Longitud del usuario (−180 a 180)</td></tr>
+              <tr><td><code>radio</code></td><td>int</td><td>300</td><td>Radio de búsqueda en metros (50–2000)</td></tr>
+              <tr><td><code>max_paradas</code></td><td>int</td><td>3</td><td>Máximo de paradas a devolver (1–10)</td></tr>
+              <tr><td><code>bearing</code></td><td>float</td><td>null</td><td>Orientación del usuario en grados (0–360)</td></tr>
+              <tr><td><code>bearing_tolerance</code></td><td>float</td><td>60</td><td>Tolerancia de orientación (0–180)</td></tr>
+              <tr><td><code>tiempo_max</code></td><td>int</td><td>null</td><td>Solo buses que lleguen en ≤ X minutos</td></tr>
+              <tr><td><code>lineas</code></td><td>string</td><td>null</td><td>Filtrar líneas separadas por comas (ej: <code>01,C4</code>)</td></tr>
+              <tr><td><code>sentido</code></td><td>int</td><td>null</td><td>Filtrar por sentido: 1 (ida) o 2 (vuelta)</td></tr>
+              <tr><td><code>formato</code></td><td>string</td><td>json</td><td><code>json</code> o <code>geojson</code></td></tr>
+              <tr><td><code>incluir_mapa</code></td><td>bool</td><td>false</td><td>Añade una URL de OpenStreetMap por parada</td></tr>
+            </tbody>
+          </table>
+          <h3 class="docs-h3">Ejemplo</h3>
+          <div class="code-block">
+            <div class="code-block-head"><span>petición</span></div>
+            <pre><code>curl "http://localhost:8081/cercanas?lat=37.3896&amp;lon=-5.9842&amp;max_paradas=2"</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-block-head"><span>respuesta 200</span></div>
+            <pre><code>{
+  "ubicacion": { "lat": 37.3896, "lon": -5.9842, "bearing": null },
+  "paradas": [
+    {
+      "codigo": "43",
+      "nombre": "Recaredo (Puerta Carmona)",
+      "latitud": 37.389663,
+      "longitud": -5.984265,
+      "distancia": 74,
+      "calle": "Calle Recaredo",
+      "numero": "5",
+      "codigo_postal": "41003",
+      "municipio": "Sevilla",
+      "direccion_completa": "Calle Recaredo 5",
+      "tiempos_status": "ok",
+      "tiempos": [
+        { "linea": "01", "color": "#f54129", "tiempo_minutos": 2,
+          "destino": "POL. NORTE", "distancia_metros": 420, "sentido": 1 }
+      ]
+    }
+  ]
+}</code></pre>
+          </div>
+          <h3 class="docs-h3">Señalización del estado del origen</h3>
+          <p>Cada parada incluye <code>tiempos_status</code> para que el cliente interprete correctamente una lista de tiempos vacía:</p>
+          <table class="docs-table">
+            <thead><tr><th>Valor</th><th>Significado</th></tr></thead>
+            <tbody>
+              <tr><td><code>ok</code></td><td>Consulta correcta. La lista vacía significa que no vienen buses.</td></tr>
+              <tr><td><code>unavailable</code></td><td>El origen no respondió y no había cache que servir.</td></tr>
+              <tr><td><code>error</code></td><td>Error inesperado al procesar la parada.</td></tr>
+            </tbody>
+          </table>
+          <p>Si los datos provienen de cache antigua, la parada añade <code>stale: true</code> y <code>cached_at</code> con el instante de la última consulta buena.</p>
+          <div class="docs-callout">
+            El máximo de tiempos por parada es 5. Los campos <code>provincia</code>, <code>comunidad_autonoma</code> y <code>updated_at</code> no se incluyen aquí; para obtenerlos usa <code>GET /paradas/{codigo}</code>.
+          </div>
+        </section>
+
+        <section id="ep-paradas" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/paradas</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Devuelve el catálogo completo de paradas (967 actualmente) con todos sus campos, incluida la dirección postal. Ordenadas por código.</p>
+          <div class="code-block">
+            <div class="code-block-head"><span>respuesta 200 (un elemento)</span></div>
+            <pre><code>{
+  "codigo": "889",
+  "nombre": "Recaredo (San Roque)",
+  "latitud": 37.391250,
+  "longitud": -5.984236,
+  "calle": "Calle Recaredo",
+  "numero": "5",
+  "codigo_postal": "41003",
+  "municipio": "Sevilla",
+  "provincia": "Sevilla",
+  "comunidad_autonoma": "Andalucía",
+  "direccion_completa": "Calle Recaredo 5",
+  "updated_at": "2026-02-16T20:41:18"
+}</code></pre>
+          </div>
+        </section>
+
+        <section id="ep-paradas-cercanas" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/paradas/cercanas</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Paradas cercanas <em>sin</em> tiempos de llegada. Más rápido que <code>/cercanas</code>; útil para pintar marcadores en un mapa. Devuelve todas las paradas dentro del radio (sin límite de número), cada una con <code>distancia</code>, <code>bearing</code> y <code>bearing_diff</code>.</p>
+          <table class="docs-table">
+            <thead><tr><th>Parámetro</th><th>Tipo</th><th>Def.</th><th>Descripción</th></tr></thead>
+            <tbody>
+              <tr><td><code>lat</code> <span class="req">obligatorio</span></td><td>float</td><td>—</td><td>Latitud (−90 a 90)</td></tr>
+              <tr><td><code>lon</code> <span class="req">obligatorio</span></td><td>float</td><td>—</td><td>Longitud (−180 a 180)</td></tr>
+              <tr><td><code>radio</code></td><td>int</td><td>500</td><td>Radio en metros (50–2000). Nota: aquí el defecto es 500.</td></tr>
+              <tr><td><code>bearing</code></td><td>float</td><td>null</td><td>Orientación del usuario (0–360)</td></tr>
+              <tr><td><code>bearing_tolerance</code></td><td>float</td><td>60</td><td>Tolerancia en grados (0–180)</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="ep-parada" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/paradas/{codigo}</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Datos completos de una parada por su código. El código debe ser numérico (1–7 dígitos); un formato inválido se rechaza con <code>422</code> y una parada inexistente con <code>404</code>.</p>
+          <div class="code-block">
+            <div class="code-block-head"><span>petición</span></div>
+            <pre><code>curl http://localhost:8081/paradas/43</code></pre>
+          </div>
+        </section>
+
+        <section id="ep-tiempos" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/paradas/{codigo}/tiempos</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Tiempos de llegada en tiempo real de una parada concreta. A diferencia de <code>/cercanas</code>, aquí la respuesta se ajusta al modelo <code>TiemposParadaOut</code> con metadatos explícitos de frescura y estado del origen.</p>
+          <div class="code-block">
+            <div class="code-block-head"><span>respuesta 200</span></div>
+            <pre><code>{
+  "parada": "43",
+  "nombre": "Recaredo (Puerta Carmona)",
+  "latitud": 37.389663,
+  "longitud": -5.984265,
+  "tiempos": [
+    { "linea": "01", "color": "#f54129", "tiempo_minutos": 2,
+      "destino": "POL. NORTE", "distancia_metros": 420, "sentido": 1 }
+  ]
+}</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-block-head"><span>respuesta 200 · origen no disponible</span></div>
+            <pre><code>{
+  "parada": "43",
+  "nombre": "Recaredo (Puerta Carmona)",
+  "latitud": 37.389663,
+  "longitud": -5.984265,
+  "tiempos": [],
+  "upstream_status": "unavailable",
+  "upstream_detail": "TUSSAM API no disponible. Inténtalo en unos segundos."
+}</code></pre>
+          </div>
+          <h3 class="docs-h3">Campos de cada tiempo</h3>
+          <table class="docs-table">
+            <thead><tr><th>Campo</th><th>Tipo</th><th>Descripción</th></tr></thead>
+            <tbody>
+              <tr><td><code>linea</code></td><td>string</td><td>Número de línea (ej: <code>01</code>, <code>C4</code>)</td></tr>
+              <tr><td><code>color</code></td><td>string</td><td>Color hex oficial de la línea</td></tr>
+              <tr><td><code>tiempo_minutos</code></td><td>int</td><td>Minutos hasta la llegada. Puede ser negativo (bus ya en la parada)</td></tr>
+              <tr><td><code>destino</code></td><td>string</td><td>Nombre del destino final</td></tr>
+              <tr><td><code>distancia_metros</code></td><td>int / null</td><td>Distancia del bus a la parada</td></tr>
+              <tr><td><code>sentido</code></td><td>int / null</td><td>1 (ida), 2 (vuelta), o null si la línea pasa en ambos sentidos</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="ep-parada-lineas" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/paradas/{codigo}/lineas</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Lista de números de línea que pasan por una parada. Ejemplo de respuesta: <code>["01", "C4"]</code>.</p>
+        </section>
+
+        <section id="ep-lineas" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/lineas</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Catálogo de líneas de TUSSAM con su color oficial, número, nombre y horarios de ida y vuelta.</p>
+          <div class="code-block">
+            <div class="code-block-head"><span>respuesta 200 (un elemento)</span></div>
+            <pre><code>{
+  "numero": "01",
+  "nombre": "Pol. Norte - H. Virgen del Rocío",
+  "color": "#f54129",
+  "sublinea": null,
+  "hora_inicio_ida": "06:00",
+  "hora_fin_ida": "23:30",
+  "hora_inicio_vuelta": "06:00",
+  "hora_fin_vuelta": "23:30",
+  "updated_at": "2026-02-16T20:41:18"
+}</code></pre>
+          </div>
+        </section>
+
+        <section id="ep-linea-paradas" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/lineas/{linea_numero}/paradas</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Recorrido de una línea: sus paradas ordenadas por sentido y orden. El número de línea es alfanumérico (1–8 caracteres); un formato inválido devuelve <code>422</code>. Cada parada incluye los campos habituales más <code>sentido</code> y <code>orden</code>.</p>
+        </section>
+
+        <section id="ep-health" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method get">GET</span>
+            <code class="endpoint-path">/health</code>
+            <span class="badge-public">Público</span>
+          </div>
+          <p>Estado de la API y de la base de datos para Docker, balanceadores y monitorización. No consulta el origen ni consume cuota de rate limiting.</p>
+          <div class="code-block">
+            <div class="code-block-head"><span>respuesta 200</span></div>
+            <pre><code>{ "status": "ok", "db": "connected", "paradas_en_db": 967, "version": "1.1.0" }</code></pre>
+          </div>
+          <ul class="docs-list">
+            <li><code>status: "ok"</code> — operativo con datos.</li>
+            <li><code>status: "no_data"</code> — la base de datos responde pero está vacía (falta el sync inicial).</li>
+            <li><code>503</code> — la base de datos no responde.</li>
+          </ul>
+        </section>
+
+        <section id="ep-sync" class="endpoint">
+          <div class="endpoint-head">
+            <span class="method post">POST</span>
+            <code class="endpoint-path">/sync/*</code>
+            <span class="badge-key">API key</span>
+          </div>
+          <p>Endpoints de sincronización que reconstruyen el catálogo desde el origen. Requieren <code>X-API-Key</code>. Solo se ejecuta una sincronización a la vez: si hay una en curso, el resto responde <code>409</code>. El scheduler los ejecuta automáticamente una vez por semana.</p>
+          <table class="docs-table">
+            <thead><tr><th>Endpoint</th><th>Acción</th></tr></thead>
+            <tbody>
+              <tr><td><code>POST /sync/all</code></td><td>Paradas + líneas + relaciones, en orden.</td></tr>
+              <tr><td><code>POST /sync/paradas</code></td><td>Solo el catálogo de paradas.</td></tr>
+              <tr><td><code>POST /sync/lineas</code></td><td>Solo el catálogo de líneas.</td></tr>
+              <tr><td><code>POST /sync/paradas-lineas</code></td><td>Solo las relaciones parada-línea.</td></tr>
+              <tr><td><code>POST /sync/direcciones</code></td><td>Geocodifica paradas sin dirección con Nominatim (~4 min).</td></tr>
+            </tbody>
+          </table>
+          <div class="docs-callout">
+            Un sync que no recupera datos del origen (por ejemplo, bloqueo de Cloudflare) aborta sin machacar el catálogo existente: se preserva el último estado bueno en lugar de dejar la base de datos vacía o parcial.
+          </div>
+        </section>
+
+        <!-- ── REFERENCIA ─────────────────────────────────────────── -->
+        <section id="errores">
+          <h2 class="docs-h2">Códigos de error</h2>
+          <table class="docs-table">
+            <thead><tr><th>Código</th><th>Significado</th></tr></thead>
+            <tbody>
+              <tr><td><code>400</code></td><td>Parámetro de negocio inválido (lat/lon/bearing/formato/sentido fuera de rango).</td></tr>
+              <tr><td><code>403</code></td><td>API key inválida o ausente en un endpoint de sync.</td></tr>
+              <tr><td><code>404</code></td><td>Parada inexistente (con formato de código válido).</td></tr>
+              <tr><td><code>409</code></td><td>Ya hay una sincronización en curso.</td></tr>
+              <tr><td><code>422</code></td><td>Validación de formato en el borde (código no numérico, radio o max_paradas fuera de rango).</td></tr>
+              <tr><td><code>429</code></td><td>Rate limit superado. Consulta <code>Retry-After</code>.</td></tr>
+              <tr><td><code>500</code></td><td>Error interno inesperado.</td></tr>
+              <tr><td><code>503</code></td><td>Base de datos no disponible, o configuración de sync insegura.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="despliegue">
+          <h2 class="docs-h2">Despliegue</h2>
+          <p>La vía más rápida es la imagen publicada en el GitHub Container Registry (<code>ghcr.io/686f6c61/api-tussam</code>), que incluye una base de datos precargada: la API responde desde el primer arranque sin necesidad de sincronizar. La clave de sync solo hace falta para los endpoints de administración; expórtala en tu entorno (por ejemplo, generada con <code>openssl rand -hex 24</code>).</p>
+          <div class="code-block">
+            <div class="code-block-head"><span>imagen publicada en GHCR</span></div>
+            <pre><code># Descarga la imagen del GitHub Container Registry
+docker pull ghcr.io/686f6c61/api-tussam:main
+
+# Arráncala (escucha en el puerto 8081; la clave solo hace falta para /sync/*)
+export MI_CLAVE_DE_SYNC=$(openssl rand -hex 24)
+docker run -d -p 8081:8080 \
+  -e SYNC_API_KEY=$MI_CLAVE_DE_SYNC \
+  ghcr.io/686f6c61/api-tussam:main
+
+# Verifica el estado
+curl http://localhost:8081/health</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-block-head"><span>alternativa: Docker Compose (build local)</span></div>
+            <pre><code>export MI_CLAVE_DE_SYNC=$(openssl rand -hex 24)
+SYNC_API_KEY=$MI_CLAVE_DE_SYNC docker compose up -d</code></pre>
+          </div>
+          <div class="code-block">
+            <div class="code-block-head"><span>sin Docker</span></div>
+            <pre><code>pip install -e .
+export MI_CLAVE_DE_SYNC=$(openssl rand -hex 24)
+SYNC_API_KEY=$MI_CLAVE_DE_SYNC uvicorn app.main:app \
+  --host 0.0.0.0 --port 8080 --proxy-headers</code></pre>
+          </div>
+        </section>
+
+        <section id="config">
+          <h2 class="docs-h2">Variables de entorno</h2>
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Def.</th><th>Descripción</th></tr></thead>
+            <tbody>
+              <tr><td><code>APP_ENV</code></td><td>development</td><td><code>production</code> desactiva <code>/docs</code>, activa HSTS y bloquea sync inseguro.</td></tr>
+              <tr><td><code>SYNC_API_KEY</code></td><td>—</td><td>Clave para los endpoints de sincronización. Obligatoria para operarlos.</td></tr>
+              <tr><td><code>ENABLE_DOCS</code></td><td>según entorno</td><td>Expone <code>/docs</code>, <code>/redoc</code> y <code>/openapi.json</code>.</td></tr>
+              <tr><td><code>CORS_ORIGINS</code></td><td><code>*</code> (dev)</td><td>Lista blanca de orígenes permitidos (separados por comas).</td></tr>
+              <tr><td><code>ALLOWED_HOSTS</code></td><td>—</td><td>Hosts permitidos (Host header). localhost se añade siempre.</td></tr>
+              <tr><td><code>TRUSTED_PROXY_IPS</code></td><td>—</td><td>IPs de proxy de las que se acepta <code>X-Forwarded-For</code>.</td></tr>
+              <tr><td><code>TIEMPOS_CACHE_TTL_SECONDS</code></td><td>60</td><td>TTL del cache fresco de tiempos.</td></tr>
+              <tr><td><code>TIEMPOS_STALE_TTL_SECONDS</code></td><td>600</td><td>Antigüedad máxima de la cache stale de respaldo.</td></tr>
+              <tr><td><code>SYNC_ENABLED</code> / <code>SYNC_DAY</code> / <code>SYNC_HOUR</code> / <code>SYNC_MINUTE</code></td><td>true / sun / 4 / 0</td><td>Programación del sync semanal (hora en UTC).</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <footer class="docs-footer">
+          <p>API TUSSAM · Documentación · Licencia MIT · <a href="https://github.com/686f6c61/API-TUSSAM">Repositorio en GitHub</a></p>
+          <p>Proyecto independiente sin relación con TUSSAM.</p>
+        </footer>
+      </main>
+    </div>
+
+    <div class="copy-toast" id="copy-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

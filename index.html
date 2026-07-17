@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="API TUSSAM es una API REST de código abierto para consultar en tiempo real las paradas, líneas y tiempos de llegada de los autobuses de TUSSAM (Sevilla), con cache inteligente, rate limiting y fallback ante caídas.">
+    <meta name="author" content="686f6c61">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+    <meta name="theme-color" content="#f2f1eb">
+
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="es_ES">
+    <meta property="og:site_name" content="API TUSSAM">
+    <meta property="og:url" content="https://686f6c61.github.io/API-TUSSAM/">
+    <meta property="og:title" content="API TUSSAM · Una parada. Todos sus tiempos.">
+    <meta property="og:description" content="API REST para los autobuses de Sevilla: paradas cercanas, líneas y tiempos de llegada en tiempo real, con cache, resiliencia y despliegue en Docker.">
+    <meta property="og:image" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+    <meta property="og:image:secure_url" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="API TUSSAM · Una parada. Todos sus tiempos. Tarjeta con las cifras de la red de autobuses de Sevilla.">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:creator" content="@686f6c61">
+    <meta name="twitter:title" content="API TUSSAM · Una parada. Todos sus tiempos.">
+    <meta name="twitter:description" content="API REST de código abierto para consultar los autobuses de TUSSAM (Sevilla) en tiempo real.">
+    <meta name="twitter:image" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+    <meta name="twitter:image:alt" content="API TUSSAM · Una parada. Todos sus tiempos.">
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="canonical" href="https://686f6c61.github.io/API-TUSSAM/">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <title>API TUSSAM · Tiempos de autobús de Sevilla en tiempo real</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "API TUSSAM",
+        "description": "API REST para consultar paradas, líneas y tiempos de llegada de los autobuses de TUSSAM (Sevilla) en tiempo real.",
+        "codeRepository": "https://github.com/686f6c61/API-TUSSAM",
+        "programmingLanguage": "Python",
+        "runtimePlatform": "Python 3.11+",
+        "license": "https://opensource.org/licenses/MIT",
+        "author": {
+          "@type": "Person",
+          "name": "686f6c61",
+          "url": "https://github.com/686f6c61"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top">
+        <span>API TUSSAM</span><mark>REST</mark>
+      </a>
+      <nav class="site-nav" aria-label="Navegación principal">
+        <a href="#board">En vivo</a>
+        <a href="#flujo">Cómo funciona</a>
+        <a href="#endpoints">Endpoints</a>
+        <a href="#api">Integración</a>
+        <a href="docs.html">Documentación</a>
+      </nav>
+      <a class="header-link" href="https://github.com/686f6c61/API-TUSSAM">GitHub</a>
+    </header>
+
+    <main id="main">
+      <!-- HERO: composición asimétrica, texto a la izquierda y panel de red a la derecha -->
+      <section class="hero hero-split" id="top" aria-labelledby="hero-title">
+        <div class="page-shell hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">REST · FastAPI · Sevilla · tiempo real</p>
+            <h1 id="hero-title">Una parada.<br><mark>Todos sus tiempos.</mark></h1>
+            <p class="hero-lede">
+              La API de TUSSAM es interna, sin CORS y con un rate limit agresivo. Esta API la convierte en un servicio abierto: normaliza coordenadas, cachea tiempos, reintenta con criterio y responde aunque el origen se caiga.
+            </p>
+            <div class="install-line" role="group" aria-label="Comando de arranque">
+              <code>docker pull ghcr.io/686f6c61/api-tussam:main</code>
+              <button class="copy-command" type="button" data-copy="docker pull ghcr.io/686f6c61/api-tussam:main">Copiar</button>
+            </div>
+          </div>
+
+          <aside class="net-panel" aria-label="La red TUSSAM en cifras">
+            <div class="net-panel-head">
+              <span class="net-dot" aria-hidden="true"></span>
+              <span>Red TUSSAM · en servicio</span>
+            </div>
+            <dl class="net-stats">
+              <div><dt>Paradas</dt><dd>967</dd></div>
+              <div><dt>Líneas</dt><dd>49</dd></div>
+              <div><dt>Relaciones parada-línea</dt><dd>1.756</dd></div>
+              <div><dt>Cache de tiempos</dt><dd>60 s</dd></div>
+            </dl>
+            <p class="net-panel-foot">SQLite en modo WAL · base de datos precargada en la imagen</p>
+          </aside>
+        </div>
+      </section>
+
+      <!-- TICKER: banda tipo teletipo de parada, con la superficie de la API -->
+      <div class="ticker" aria-hidden="true">
+        <div class="ticker-track">
+          <span>GET&nbsp;/cercanas</span><i>●</i>
+          <span>GET&nbsp;/paradas</span><i>●</i>
+          <span>GET&nbsp;/paradas/{codigo}/tiempos</span><i>●</i>
+          <span>GET&nbsp;/lineas</span><i>●</i>
+          <span>GeoJSON</span><i>●</i>
+          <span>cache&nbsp;60s</span><i>●</i>
+          <span>fallback&nbsp;stale</span><i>●</i>
+          <span>single-flight</span><i>●</i>
+          <span>rate&nbsp;limit&nbsp;IP+device</span><i>●</i>
+          <span>GET&nbsp;/cercanas</span><i>●</i>
+          <span>GET&nbsp;/paradas</span><i>●</i>
+          <span>GET&nbsp;/paradas/{codigo}/tiempos</span><i>●</i>
+          <span>GET&nbsp;/lineas</span><i>●</i>
+          <span>GeoJSON</span><i>●</i>
+          <span>cache&nbsp;60s</span><i>●</i>
+          <span>fallback&nbsp;stale</span><i>●</i>
+          <span>single-flight</span><i>●</i>
+          <span>rate&nbsp;limit&nbsp;IP+device</span><i>●</i>
+        </div>
+      </div>
+
+      <!-- TABLÓN DE LLEGADAS: pieza central, respuesta real de /cercanas -->
+      <section class="board-section" id="board" aria-labelledby="board-title">
+        <div class="board-head page-shell">
+          <div>
+            <p class="eyebrow">GET /cercanas · respuesta real</p>
+            <h2 id="board-title">El tablón de llegadas, en JSON</h2>
+          </div>
+          <p class="board-note">Simulación con datos reales de la red: paradas junto a la Puerta de Carmona.</p>
+        </div>
+        <div class="page-shell board-grid">
+          <article class="stop-board" aria-label="Tablón de llegadas de la parada Recaredo">
+            <header>
+              <span class="stop-code">43</span>
+              <div>
+                <strong>Recaredo (Puerta Carmona)</strong>
+                <small>Calle Recaredo, 5 · a 74 m</small>
+              </div>
+            </header>
+            <ul id="arrivals-43" class="arrivals"></ul>
+          </article>
+          <article class="stop-board" aria-label="Tablón de llegadas de la parada San Esteban">
+            <header>
+              <span class="stop-code">44</span>
+              <div>
+                <strong>San Esteban</strong>
+                <small>Calle San Esteban, 12 · a 158 m</small>
+              </div>
+            </header>
+            <ul id="arrivals-44" class="arrivals"></ul>
+          </article>
+          <article class="board-request">
+            <div class="code-toolbar">
+              <span>petición</span>
+              <button class="copy-command" type="button" data-copy="curl 'http://localhost:8081/cercanas?lat=37.3896&lon=-5.9842&radio=300&max_paradas=2'">Copiar</button>
+            </div>
+            <pre><code>curl 'http://localhost:8081/cercanas
+  ?lat=37.3896&amp;lon=-5.9842
+  &amp;radio=300&amp;max_paradas=2'</code></pre>
+            <p>Bounding box + Haversine sobre las 967 paradas, tiempos con cache de 60 segundos y <em>fallback</em> a la última respuesta buena si TUSSAM no contesta.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- CÓMO FUNCIONA: línea de tiempo vertical numerada -->
+      <section class="flow-section" id="flujo" aria-labelledby="flow-title">
+        <div class="page-shell flow-head">
+          <p class="eyebrow">Ciclo de una petición</p>
+          <h2 id="flow-title">Cada petición deja el origen en paz</h2>
+          <p>El objetivo es dar tiempos frescos sin castigar a la API interna de TUSSAM. Cache con TTL, una sola llamada en vuelo por parada y reintentos que respetan el <code>Retry-After</code> del origen.</p>
+        </div>
+        <ol class="flow-rail page-shell">
+          <li>
+            <span class="flow-num">01</span>
+            <div class="flow-body">
+              <strong>Valida y limita</strong>
+              <p>Comprueba coordenadas y formato de parámetros, y aplica el rate limiting combinado por IP y por dispositivo antes de tocar nada.</p>
+            </div>
+          </li>
+          <li>
+            <span class="flow-num">02</span>
+            <div class="flow-body">
+              <strong>Busca la parada</strong>
+              <p>Prefiltra por bounding box y afina con Haversine sobre las 967 paradas cargadas en SQLite, sin salir a la red.</p>
+            </div>
+          </li>
+          <li>
+            <span class="flow-num">03</span>
+            <div class="flow-body">
+              <strong>Sirve desde cache</strong>
+              <p>Si hay tiempos de menos de 60 segundos, responde al instante. El origen solo se consulta cuando la cache expira.</p>
+            </div>
+          </li>
+          <li>
+            <span class="flow-num">04</span>
+            <div class="flow-body">
+              <strong>Consulta con single-flight</strong>
+              <p>Cien clientes preguntando por la misma parada generan una única petición saliente; el resto espera su resultado.</p>
+            </div>
+          </li>
+          <li>
+            <span class="flow-num">05</span>
+            <div class="flow-body">
+              <strong>Resiste y responde</strong>
+              <p>Reintenta ante 429/5xx, cae a la última respuesta buena si el origen falla, y devuelve JSON o GeoJSON señalizando el estado.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- RESILIENCIA: tabla comparativa problema del origen vs respuesta de la API -->
+      <section class="resil-section" id="resiliencia" aria-labelledby="resil-title">
+        <div class="page-shell section-heading">
+          <p class="eyebrow">Fiabilidad</p>
+          <h2 id="resil-title">El origen falla.<br>La API responde.</h2>
+          <p>reddelineas.tussam.es devuelve 429 con facilidad y a veces cambia el formato de la respuesta. Cada defensa está pensada para que el cliente final nunca herede esos problemas.</p>
+        </div>
+        <div class="page-shell resil-compare">
+          <div class="resil-colhead">
+            <span class="resil-tag bad">El origen hace</span>
+            <span class="resil-tag good">La API responde</span>
+          </div>
+          <div class="resil-row">
+            <div class="resil-problem"><strong>Rate limit agresivo</strong><p>Bloquea peticiones frecuentes con HTTP 429.</p></div>
+            <div class="resil-solution"><strong>Cache con TTL de 60 s</strong><p>Los tiempos se sirven desde SQLite; el origen solo se consulta al expirar.</p></div>
+          </div>
+          <div class="resil-row">
+            <div class="resil-problem"><strong>Se satura con ráfagas</strong><p>Muchas llamadas iguales a la vez lo tumban.</p></div>
+            <div class="resil-solution"><strong>Single-flight por parada</strong><p>Las peticiones concurrentes a una parada comparten una sola llamada saliente.</p></div>
+          </div>
+          <div class="resil-row">
+            <div class="resil-problem"><strong>Caídas intermitentes</strong><p>Responde 5xx o deja de contestar sin avisar.</p></div>
+            <div class="resil-solution"><strong>Cache stale marcada</strong><p>Sirve la última respuesta válida con <code>stale: true</code> y <code>cached_at</code>.</p></div>
+          </div>
+          <div class="resil-row">
+            <div class="resil-problem"><strong>Formato propietario</strong><p>Coordenadas en E6 y contrato sin documentar.</p></div>
+            <div class="resil-solution"><strong>Normalización estable</strong><p>Grados decimales, GeoJSON opcional y <code>tiempos_status</code> por parada.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ENDPOINTS: panel de salidas con un endpoint destacado y filas tipo marcador -->
+      <section class="ep-section" id="endpoints" aria-labelledby="ep-title">
+        <div class="page-shell section-heading">
+          <p class="eyebrow">Superficie pública</p>
+          <h2 id="ep-title">Endpoints que resuelven casos reales</h2>
+          <p>Desde «¿qué bus me viene?» hasta pintar la red entera en un mapa. Todo en JSON limpio, con coordenadas en grados decimales y direcciones postales completas.</p>
+        </div>
+        <div class="page-shell ep-layout">
+          <article class="ep-featured">
+            <div class="ep-featured-head">
+              <span class="ep-method get">GET</span>
+              <span class="ep-badge">Recomendado</span>
+            </div>
+            <h3><code>/cercanas</code></h3>
+            <p>El endpoint agregado: paradas cercanas <em>con</em> sus tiempos de llegada en una sola llamada. Filtros por línea, sentido, orientación y tiempo máximo. Salida JSON o GeoJSON.</p>
+            <ul class="ep-featured-list">
+              <li>Una petición, todas las paradas cercanas y sus buses</li>
+              <li>Estado del origen por parada (<code>tiempos_status</code>)</li>
+              <li>GeoJSON nativo para Leaflet o MapLibre</li>
+            </ul>
+          </article>
+
+          <ul class="ep-board" aria-label="Resto de endpoints">
+            <li class="ep-row">
+              <span class="ep-method get">GET</span>
+              <code class="ep-path">/paradas</code>
+              <span class="ep-desc">Las 967 paradas con coordenadas, calle, número y código postal.</span>
+              <span class="ep-access">público</span>
+            </li>
+            <li class="ep-row">
+              <span class="ep-method get">GET</span>
+              <code class="ep-path">/paradas/{codigo}/tiempos</code>
+              <span class="ep-desc">Buses en camino a una parada: línea, destino, minutos y vehículo.</span>
+              <span class="ep-access">público</span>
+            </li>
+            <li class="ep-row">
+              <span class="ep-method get">GET</span>
+              <code class="ep-path">/lineas</code>
+              <span class="ep-desc">Líneas con su color oficial, horarios y recorrido por sentido.</span>
+              <span class="ep-access">público</span>
+            </li>
+            <li class="ep-row">
+              <span class="ep-method get">GET</span>
+              <code class="ep-path">/health</code>
+              <span class="ep-desc">Estado de la API y la base de datos para Docker y balanceadores.</span>
+              <span class="ep-access">público</span>
+            </li>
+            <li class="ep-row">
+              <span class="ep-method post">POST</span>
+              <code class="ep-path">/sync/*</code>
+              <span class="ep-desc">Sincronización de paradas, líneas y geocodificación bajo API key.</span>
+              <span class="ep-access key">api key</span>
+            </li>
+          </ul>
+        </div>
+        <p class="page-shell ep-more"><a href="docs.html">Ver la referencia completa en la documentación →</a></p>
+      </section>
+
+      <!-- INTEGRACIÓN: bloque a ancho completo con contratos en cabecera y código debajo -->
+      <section class="int-section" id="api" aria-labelledby="api-title">
+        <div class="page-shell int-head">
+          <div>
+            <p class="eyebrow">Integración</p>
+            <h2 id="api-title">Un endpoint. Cualquier cliente.</h2>
+          </div>
+          <ul class="int-contracts">
+            <li><span>HTTP</span> JSON con <code>curl</code>, apps o cualquier backend</li>
+            <li><span>Web</span> <code>fetch</code> desde el navegador gracias a CORS</li>
+            <li><span>Mapas</span> <code>formato=geojson</code> a Leaflet o MapLibre</li>
+            <li><span>Docker</span> <code>ghcr.io/686f6c61/api-tussam</code> con base de datos precargada</li>
+          </ul>
+        </div>
+        <div class="page-shell code-workbench int-code">
+          <div class="code-tabs" role="tablist" aria-label="Ejemplos de integración">
+            <button id="code-curl-tab" type="button" role="tab" aria-controls="code-panel" aria-selected="true" tabindex="0" data-code="curl">curl</button>
+            <button id="code-js-tab" type="button" role="tab" aria-controls="code-panel" aria-selected="false" tabindex="-1" data-code="js">JavaScript</button>
+            <button id="code-python-tab" type="button" role="tab" aria-controls="code-panel" aria-selected="false" tabindex="-1" data-code="python">Python</button>
+            <button id="code-geojson-tab" type="button" role="tab" aria-controls="code-panel" aria-selected="false" tabindex="-1" data-code="geojson">GeoJSON</button>
+          </div>
+          <div id="code-panel" role="tabpanel" aria-labelledby="code-curl-tab" tabindex="0">
+            <div class="code-toolbar">
+              <span id="code-filename">terminal</span>
+              <button class="copy-command" id="copy-code" type="button">Copiar</button>
+            </div>
+            <pre><code id="code-sample"></code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA: panel bordeado a ancho completo -->
+      <section class="cta-section" aria-labelledby="cta-title">
+        <div class="page-shell cta-panel">
+          <div>
+            <p class="eyebrow">Código abierto · MIT</p>
+            <h2 id="cta-title">Sevilla en movimiento.<br><mark>Tu app también.</mark></h2>
+          </div>
+          <div class="cta-actions">
+            <a class="primary-action" href="https://github.com/686f6c61/API-TUSSAM">Ver el código</a>
+            <a class="secondary-action" href="docs.html">Leer la documentación</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="page-shell">
+        <strong>API TUSSAM</strong>
+        <div class="footer-meta">
+          <p>API REST no oficial para los autobuses de Sevilla · MIT</p>
+          <p>Creado por <a href="https://github.com/686f6c61">686f6c61</a> · Proyecto independiente sin relación con TUSSAM</p>
+        </div>
+        <nav aria-label="Enlaces del pie">
+          <a href="https://github.com/686f6c61/API-TUSSAM">GitHub</a>
+          <a href="https://github.com/686f6c61/API-TUSSAM/pkgs/container/api-tussam">Imagen Docker</a>
+          <a href="docs.html">Documentación</a>
+          <a href="https://github.com/686f6c61/API-TUSSAM/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://x.com/686f6c61">X (@686f6c61)</a>
+        </nav>
+      </div>
+    </footer>
+
+    <div class="copy-toast" id="copy-toast" role="status" aria-live="polite"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>
