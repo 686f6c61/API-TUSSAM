@@ -67,12 +67,27 @@
     return "#f7a800";
   }
 
-  /** Construye el HTML de los chips de línea de una parada. */
+  /** Devuelve un color de texto (blanco o tinta) legible sobre el color dado.
+   *
+   * Calcula la luminancia percibida del color de la línea; para colores claros
+   * (amarillo, celeste…) usa texto oscuro y para oscuros, blanco.
+   */
+  function textoContraste(hex) {
+    const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+    if (!m) return "#ffffff";
+    const n = parseInt(m[1], 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.6 ? "#141414" : "#ffffff";
+  }
+
+  /** Construye el HTML de los chips de línea de una parada (pastilla de color). */
   function chipsLineas(parada) {
     return parada.lineas
       .map((linea) => {
         const color = estado.colorPorLinea.get(linea) || "#141414";
-        return `<span class="mini-line" style="--c:${esc(color)}">${esc(linea)}</span>`;
+        const txt = textoContraste(color);
+        return `<span class="mini-line" style="--c:${esc(color)};--t:${txt}">${esc(linea)}</span>`;
       })
       .join("");
   }
@@ -176,6 +191,7 @@
       chip.type = "button";
       chip.className = "line-chip";
       chip.style.setProperty("--c", linea.color);
+      chip.style.setProperty("--t", textoContraste(linea.color));
       chip.dataset.linea = linea.numero;
       chip.textContent = linea.numero;
       chip.title = `${linea.numero} · ${linea.nombre}`;

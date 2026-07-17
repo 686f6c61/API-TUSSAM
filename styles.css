@@ -2578,6 +2578,7 @@ a:focus-visible,
 
 .line-chip {
   --c: #141414;
+  --t: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2589,8 +2590,7 @@ a:focus-visible,
   font-weight: 500;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
-  border-left: 5px solid var(--c);
+  border: 1.5px solid var(--c);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -2602,12 +2602,12 @@ a:focus-visible,
 /* Activo: NO monocolor. La franja de color de la línea (border-left) se conserva
    y se ensancha; la selección se marca con el resto del borde en tinta, fondo
    tenue y negrita. Se fijan los bordes por lado para no pisar el color izquierdo. */
+/* Activo: la pastilla se rellena con el color de la línea y el número usa el
+   color contrastado. Nada de franja lateral. */
 .line-chip.is-active {
-  background: #ecebe3;
-  border-top-color: var(--ink);
-  border-right-color: var(--ink);
-  border-bottom-color: var(--ink);
-  border-left-width: 7px;
+  color: var(--t);
+  background: var(--c);
+  border-color: var(--ink);
   font-weight: 700;
 }
 
@@ -2688,24 +2688,23 @@ a:focus-visible,
   gap: 4px;
 }
 
-/* Número de línea: chip neutro con una franja de color a la izquierda (el color
-   oficial de la línea), en lugar de un badge monocolor. */
+/* Número de línea: pastilla con el color oficial de la línea de fondo y el
+   número en color contrastado (como los indicadores de bus). Sin franja lateral. */
 .mini-line {
   --c: #141414;
+  --t: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
+  min-width: 28px;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 7px;
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 500;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--soft-line);
-  border-left: 4px solid var(--c);
-  border-radius: 3px;
+  font-weight: 600;
+  color: var(--t);
+  background: var(--c);
+  border-radius: 4px;
 }
 
 .stop-item-more {
