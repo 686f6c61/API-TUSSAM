@@ -11,20 +11,20 @@
     <meta property="og:type" content="article">
     <meta property="og:locale" content="es_ES">
     <meta property="og:site_name" content="API TUSSAM">
-    <meta property="og:url" content="https://686f6c61.github.io/API-TUSSAM/docs.html">
+    <meta property="og:url" content="https://tussam.686f6c61.dev/docs.html">
     <meta property="og:title" content="Documentación · API TUSSAM">
     <meta property="og:description" content="Referencia completa de la API TUSSAM: endpoints, autenticación, rate limiting, resiliencia, códigos de error y despliegue.">
-    <meta property="og:image" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+    <meta property="og:image" content="https://tussam.686f6c61.dev/og-tussam.png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:creator" content="@686f6c61">
     <meta name="twitter:title" content="Documentación · API TUSSAM">
     <meta name="twitter:description" content="Referencia completa de la API REST de los autobuses de Sevilla.">
-    <meta name="twitter:image" content="https://686f6c61.github.io/API-TUSSAM/og-tussam.png">
+    <meta name="twitter:image" content="https://tussam.686f6c61.dev/og-tussam.png">
 
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="canonical" href="https://686f6c61.github.io/API-TUSSAM/docs.html">
+    <link rel="canonical" href="https://tussam.686f6c61.dev/docs.html">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
       <nav class="site-nav" aria-label="Navegación principal">
         <a href="index.html">Inicio</a>
         <a href="#endpoints">Endpoints</a>
-        <a href="#auth">Autenticación</a>
+        <a href="paradas.html">Mapa</a>
         <a href="#despliegue">Despliegue</a>
       </nav>
       <a class="header-link" href="https://github.com/686f6c61/API-TUSSAM">GitHub</a>
@@ -77,7 +77,7 @@
 
       <main id="doc-main" class="docs-content">
         <section id="intro">
-          <p class="eyebrow">Documentación · v1.1.0</p>
+          <p class="eyebrow">Documentación · v2.0.0</p>
           <h1 class="docs-h1">API TUSSAM</h1>
           <p class="docs-lede">
             API REST de código abierto para consultar paradas, líneas y tiempos de llegada de los autobuses de TUSSAM (Sevilla) en tiempo real. Actúa como proxy inteligente sobre la API interna de TUSSAM: normaliza los datos, cachea los tiempos, reintenta con criterio ante los errores del origen y expone CORS para poder llamarse desde cualquier cliente.
@@ -387,7 +387,7 @@
           <p>Estado de la API y de la base de datos para Docker, balanceadores y monitorización. No consulta el origen ni consume cuota de rate limiting.</p>
           <div class="code-block">
             <div class="code-block-head"><span>respuesta 200</span></div>
-            <pre><code>{ "status": "ok", "db": "connected", "paradas_en_db": 967, "version": "1.1.0" }</code></pre>
+            <pre><code>{ "status": "ok", "db": "connected", "paradas_en_db": 967, "version": "2.0.0" }</code></pre>
           </div>
           <ul class="docs-list">
             <li><code>status: "ok"</code> — operativo con datos.</li>
@@ -480,13 +480,14 @@ SYNC_API_KEY=$MI_CLAVE_DE_SYNC uvicorn app.main:app \
               <tr><td><code>TRUSTED_PROXY_IPS</code></td><td>—</td><td>IPs de proxy de las que se acepta <code>X-Forwarded-For</code>.</td></tr>
               <tr><td><code>TIEMPOS_CACHE_TTL_SECONDS</code></td><td>60</td><td>TTL del cache fresco de tiempos.</td></tr>
               <tr><td><code>TIEMPOS_STALE_TTL_SECONDS</code></td><td>600</td><td>Antigüedad máxima de la cache stale de respaldo.</td></tr>
-              <tr><td><code>SYNC_ENABLED</code> / <code>SYNC_DAY</code> / <code>SYNC_HOUR</code> / <code>SYNC_MINUTE</code></td><td>true / sun / 4 / 0</td><td>Programación del sync semanal (hora en UTC).</td></tr>
+              <tr><td><code>SYNC_MIN_COMPLETENESS_RATIO</code></td><td>0.8</td><td>Proporción mínima del catálogo que un sync debe recuperar para reemplazarlo. Evita mutilar la red al sincronizar en franjas de baja actividad.</td></tr>
+              <tr><td><code>SYNC_ENABLED</code> / <code>SYNC_DAY</code> / <code>SYNC_HOUR</code> / <code>SYNC_MINUTE</code></td><td>true / sun / 11 / 0</td><td>Programación del sync semanal (hora en UTC; mediodía por defecto, con la red en servicio).</td></tr>
             </tbody>
           </table>
         </section>
 
         <footer class="docs-footer">
-          <p>API TUSSAM · Documentación · Licencia MIT · <a href="https://github.com/686f6c61/API-TUSSAM">Repositorio en GitHub</a></p>
+          <p>API TUSSAM · Documentación · Licencia PolyForm Noncommercial 1.0.0 · <a href="https://github.com/686f6c61/API-TUSSAM">Repositorio en GitHub</a></p>
           <p>Proyecto independiente sin relación con TUSSAM.</p>
         </footer>
       </main>

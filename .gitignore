@@ -1,0 +1,20 @@
+# Sitio estático (rama landing) — evitar subir basura del sistema o del editor.
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Temporales de herramientas de prueba
+.playwright-mcp/
+.playwright-cli/
+
+# Copias de seguridad y temporales
+*.bak
+*.orig
+*.tmp
+*~

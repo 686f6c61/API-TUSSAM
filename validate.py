@@ -18,6 +18,7 @@ Devuelve código de salida 0 si todo pasa, 1 si hay algún fallo.
 from __future__ import annotations
 
 import html.parser
+import json
 import pathlib
 import re
 import struct
@@ -125,7 +126,7 @@ def main() -> int:
 
     # Páginas públicas: exigen meta SEO completa. La tarjeta social es una
     # plantilla interna de render y solo se valida su estructura HTML.
-    for name in ("index.html", "docs.html"):
+    for name in ("index.html", "docs.html", "paradas.html"):
         path = WEB_DIR / name
         if not path.exists():
             failures.append(f"falta la página {name}")
@@ -142,9 +143,26 @@ def main() -> int:
     else:
         failures.append("falta sitemap.xml")
 
-    for required in ("robots.txt", ".nojekyll", "favicon.svg", "styles.css", "app.js"):
+    for required in (
+        "robots.txt", ".nojekyll", "favicon.svg", "styles.css", "app.js",
+        "paradas.js", "CNAME",
+    ):
         if not (WEB_DIR / required).exists():
             failures.append(f"falta {required}")
+
+    # Datos del mapa: deben existir y ser JSON de listas no vacías.
+    for datos in ("paradas.json", "lineas.json"):
+        path = WEB_DIR / datos
+        if not path.exists():
+            failures.append(f"falta {datos}")
+            continue
+        try:
+            contenido = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            failures.append(f"{datos}: JSON inválido ({exc})")
+            continue
+        if not isinstance(contenido, list) or not contenido:
+            failures.append(f"{datos}: debe ser una lista no vacía")
 
     og = WEB_DIR / "og-tussam.png"
     if not og.exists():

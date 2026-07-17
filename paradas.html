@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Mapa de las 967 paradas de autobús de TUSSAM (Sevilla): busca por nombre o calle y filtra por línea o por zona. Datos de la API TUSSAM.">
+    <meta name="author" content="686f6c61">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#f2f1eb">
+
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="es_ES">
+    <meta property="og:site_name" content="API TUSSAM">
+    <meta property="og:url" content="https://tussam.686f6c61.dev/paradas.html">
+    <meta property="og:title" content="Mapa de paradas · API TUSSAM">
+    <meta property="og:description" content="Explora las 967 paradas de TUSSAM en un mapa: búsqueda por nombre o calle y filtros por línea y por zona.">
+    <meta property="og:image" content="https://tussam.686f6c61.dev/og-tussam.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:creator" content="@686f6c61">
+    <meta name="twitter:title" content="Mapa de paradas · API TUSSAM">
+    <meta name="twitter:description" content="Las 967 paradas de TUSSAM en un mapa, con búsqueda y filtros por línea y zona.">
+    <meta name="twitter:image" content="https://tussam.686f6c61.dev/og-tussam.png">
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="canonical" href="https://tussam.686f6c61.dev/paradas.html">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Leaflet: mapa interactivo. Se carga desde CDN, fijado a la versión 1.9.4
+         y con Subresource Integrity para protegerse ante una manipulación del CDN. -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
+      crossorigin="anonymous">
+    <link rel="stylesheet" href="styles.css">
+    <title>Mapa de paradas · API TUSSAM</title>
+  </head>
+  <body class="map-body">
+    <a class="skip-link" href="#map">Saltar al mapa</a>
+
+    <header class="site-header">
+      <a class="brand" href="index.html">
+        <span>API TUSSAM</span><mark>MAPA</mark>
+      </a>
+      <nav class="site-nav" aria-label="Navegación principal">
+        <a href="index.html">Inicio</a>
+        <a href="index.html#endpoints">Endpoints</a>
+        <a href="paradas.html" aria-current="page">Mapa</a>
+        <a href="docs.html">Documentación</a>
+      </nav>
+      <a class="header-link" href="https://github.com/686f6c61/API-TUSSAM">GitHub</a>
+    </header>
+
+    <main class="map-page">
+      <aside class="map-sidebar" aria-label="Búsqueda y filtros de paradas">
+        <div class="map-intro">
+          <p class="eyebrow">967 paradas · red TUSSAM</p>
+          <h1>Mapa de paradas</h1>
+          <p>Busca por nombre o calle y filtra por línea o por zona. Los datos son una instantánea de la red servida por la API.</p>
+        </div>
+
+        <div class="map-controls">
+          <label class="map-search">
+            <span class="visually-hidden">Buscar parada por nombre o calle</span>
+            <input type="search" id="stop-search" placeholder="Buscar por nombre o calle…" autocomplete="off">
+          </label>
+
+          <div class="filter-group">
+            <div class="filter-head">
+              <span class="filter-label">Líneas</span>
+              <button type="button" id="reset-filters" class="filter-reset">Todas</button>
+            </div>
+            <div class="line-chips" id="line-chips" role="group" aria-label="Filtrar por línea"></div>
+          </div>
+
+          <div class="filter-group">
+            <label class="filter-label" for="zone-select">Zona (código postal)</label>
+            <select id="zone-select" class="zone-select">
+              <option value="">Todas las zonas</option>
+            </select>
+          </div>
+        </div>
+      </aside>
+
+      <div id="map" class="map-canvas" role="application" aria-label="Mapa de paradas de TUSSAM"></div>
+
+      <aside class="map-results" aria-label="Paradas encontradas">
+        <div class="results-head">
+          <span class="filter-label">Resultados</span>
+          <p class="results-count" id="results-count" aria-live="polite"></p>
+        </div>
+        <ul class="stop-list" id="stop-list"></ul>
+      </aside>
+    </main>
+
+    <div class="copy-toast" id="copy-toast" role="status" aria-live="polite"></div>
+
+    <!-- Leaflet primero; luego la lógica de la página. -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+      crossorigin="anonymous"></script>
+    <script src="paradas.js" defer></script>
+  </body>
+</html>

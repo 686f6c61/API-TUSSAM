@@ -3,4 +3,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://686f6c61.github.io/API-TUSSAM/sitemap.xml
+Sitemap: https://tussam.686f6c61.dev/sitemap.xml

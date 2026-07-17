@@ -2452,3 +2452,353 @@ a:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Página del mapa de paradas (paradas.html) ──────────────────────── */
+
+.map-body {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* La cabecera es fija (66px); el mapa ocupa el resto de la ventana.
+   Tres columnas: filtros (izquierda), mapa (centro) y lista de paradas (derecha). */
+.map-page {
+  display: grid;
+  grid-template-columns: 320px 1fr 340px;
+  height: calc(100vh - 67px);
+}
+
+.map-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* Columna derecha: lista de paradas encontradas, prominente y con scroll. */
+.map-results {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.results-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--soft-line);
+}
+
+.map-intro {
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--soft-line);
+}
+
+.map-intro h1 {
+  margin: 4px 0 8px;
+  font-size: 30px;
+  line-height: 1.05;
+}
+
+.map-intro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.map-controls {
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--soft-line);
+}
+
+.map-search input {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.map-search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filter-group {
+  margin-top: 16px;
+}
+
+.filter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.filter-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.filter-reset {
+  padding: 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.filter-reset:hover {
+  background: var(--accent);
+}
+
+/* Chips de línea: fila con scroll vertical acotado. */
+.line-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.line-chip {
+  --c: #141414;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 30px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--c);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.line-chip:hover {
+  background: #efeee7;
+}
+
+/* Activo: NO monocolor. La franja de color de la línea (border-left) se conserva
+   y se ensancha; la selección se marca con el resto del borde en tinta, fondo
+   tenue y negrita. Se fijan los bordes por lado para no pisar el color izquierdo. */
+.line-chip.is-active {
+  background: #ecebe3;
+  border-top-color: var(--ink);
+  border-right-color: var(--ink);
+  border-bottom-color: var(--ink);
+  border-left-width: 7px;
+  font-weight: 700;
+}
+
+.zone-select {
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.results-count {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Lista de resultados: ocupa el espacio restante y hace scroll. */
+.stop-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 12px 16px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.stop-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.stop-item:hover {
+  background: var(--paper);
+}
+
+.stop-item-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 26px;
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+.stop-item-body strong {
+  display: block;
+  font-size: 14.5px;
+  line-height: 1.25;
+}
+
+.stop-item-body small {
+  display: block;
+  margin: 2px 0 5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.stop-item-lines,
+.popup-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Número de línea: chip neutro con una franja de color a la izquierda (el color
+   oficial de la línea), en lugar de un badge monocolor. */
+.mini-line {
+  --c: #141414;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--soft-line);
+  border-left: 4px solid var(--c);
+  border-radius: 3px;
+}
+
+.stop-item-more {
+  padding: 12px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.map-canvas {
+  width: 100%;
+  height: 100%;
+  background: var(--paper);
+}
+
+/* Ficha (popup) de Leaflet con el estilo del sistema. */
+.leaflet-popup-content-wrapper {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.popup-stop {
+  font-family: var(--font-sans);
+}
+
+.popup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.popup-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 24px;
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+.popup-head strong {
+  font-size: 15px;
+}
+
+.popup-dir {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.popup-endpoint {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent-3);
+}
+
+@media (max-width: 980px) {
+  .map-body {
+    height: auto;
+    overflow: auto;
+  }
+
+  /* Se apilan las tres zonas: filtros, mapa y lista de resultados. */
+  .map-page {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .map-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .map-results {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .stop-list {
+    max-height: 380px;
+  }
+
+  .map-canvas {
+    height: 60vh;
+    min-height: 380px;
+  }
+}
